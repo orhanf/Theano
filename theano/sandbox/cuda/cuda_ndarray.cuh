@@ -46,15 +46,15 @@
 #include <cublas_v2.h>
 
 #ifdef _WIN32
-#ifdef _CUDA_NDARRAY_C
-#define DllExport   __declspec( dllexport )
-#else
-#define DllExport   __declspec( dllimport )
-#endif
-#define ALWAYS_INLINE
+# ifdef _CUDA_NDARRAY_C
+#  define DllExport   __declspec( dllexport )
+# else
+#  define DllExport   __declspec( dllimport )
+# endif
+# define ALWAYS_INLINE
 #else //else _WIN32
-#define DllExport
-#define ALWAYS_INLINE __attribute__((always_inline))
+# define DllExport __attribute__((visibility ("default")))
+# define ALWAYS_INLINE __attribute__((always_inline))
 #endif
 
 typedef float real;
@@ -500,6 +500,11 @@ DllExport PyObject * CudaNdarray_Copy(const CudaNdarray * self);
  * Return a new object obtained by summing over the dimensions for which there is a 1 in the mask.
  */
 DllExport PyObject * CudaNdarray_ReduceSum(CudaNdarray * self, PyObject * py_reduce_mask);
+
+/**
+ * Reshape self to the new shape gived by the tuple shape.
+ */
+DllExport PyObject * CudaNdarray_Reshape(CudaNdarray * self, PyObject * shape);
 
 /**
  * Transfer the contents of numpy array `obj` to `self`.

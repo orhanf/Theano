@@ -5,7 +5,7 @@ import numpy
 from itertools import product
 
 import theano
-from theano.compat.six import StringIO
+from six import StringIO
 import theano.tensor as T
 import theano.tests.unittest_tools as utt
 from theano.sandbox.neighbours import images2neibs
@@ -475,7 +475,7 @@ class TestDnnInferShapes(utt.InferShapeTester):
             dtype='float32'
         )
         kern_vals = numpy.asarray(
-            numpy.random.rand(3, 4, 5, 6),
+            numpy.random.rand(13, 14, 15, 16),
             dtype='float32'
         )
 

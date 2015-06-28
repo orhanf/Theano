@@ -7,7 +7,7 @@ _logger = logging.getLogger(__name__)
 import theano
 from theano import Apply
 from theano import tensor
-from theano.compat.six import StringIO
+from six.moves import StringIO, reduce
 from theano.sandbox.cuda.type import CudaNdarrayType
 from theano.sandbox.cuda import GpuOp
 from theano.sandbox.cuda.basic_ops import (as_cuda_ndarray_variable,
@@ -198,6 +198,20 @@ class BatchedDotOp(GpuOp):
                 if (gpu_x) cudaFree(gpu_x);             \
             } while (0)
         """
+
+    def grad(self, inp, grads):
+        x, y = inp
+        gz, = grads
+
+        xgrad = batched_dot(gz, y.dimshuffle(0, 2, 1))
+        ygrad = batched_dot(x.dimshuffle(0, 2, 1), gz)
+
+        rval = xgrad, ygrad
+
+        for elem in rval:
+            assert elem.dtype.find('float') != -1
+
+        return rval
 
 batched_dot = BatchedDotOp()
 
@@ -1877,7 +1891,7 @@ class GpuConv(GpuOp):
 
     def c_code_cache_version(self):
         # raise this whenever modifying any of the support_code_files
-        return (0, 22)
+        return (0, 23)
 
     def c_support_code_apply(self, node, nodename):
         # REMEMBER TO RAISE c_code_cache_version when changing any of
