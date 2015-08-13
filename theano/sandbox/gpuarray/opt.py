@@ -1,6 +1,7 @@
 import copy
 import theano
 import numpy
+from six.moves import xrange
 
 try:
     import pygpu
@@ -11,11 +12,13 @@ from theano import tensor, scalar, gof
 from theano.compile import optdb
 from theano.gof import (local_optimizer, EquilibriumDB,
                         SequenceDB, Optimizer, toolbox)
+from theano.gof.optdb import LocalGroupDB
 
 from theano.scan_module import scan_utils, scan_op, scan_opt
 
 from theano.tensor.nnet.conv import ConvOp
 from theano.tests.breakpoint import PdbBreakpoint
+
 from .type import GpuArrayType, GpuArrayConstant
 from .basic_ops import (host_from_gpu, gpu_from_host,
                         HostFromGpu, GpuFromHost,
@@ -37,6 +40,10 @@ gpu_optimizer = EquilibriumDB()
 gpu_cut_copies = EquilibriumDB()
 
 gpu_seqopt = SequenceDB()
+
+# Don't register this right now
+conv_groupopt = LocalGroupDB()
+conv_groupopt.__name__ = "gpua_conv_opts"
 
 gpu_seqopt.register('gpuarray_local_optimiziations', gpu_optimizer, 1,
                     'fast_compile', 'fast_run', 'inplace', 'gpuarray')
@@ -254,7 +261,7 @@ def local_gpu_elemwise(node):
     scal_op = op.scalar_op
     name = op.name
     if name:
-        name = 'Gpu'+name
+        name = 'Gpu' + name
     res = GpuElemwise(scal_op, name=name,
                       inplace_pattern=copy.copy(op.inplace_pattern),
                       nfunc_spec=op.nfunc_spec)
@@ -348,7 +355,7 @@ def local_gpu_pdbbreakpoint_op(node):
         nb_monitored_vars = len(node.outputs)
         for i in range(nb_monitored_vars):
 
-            inp = old_inputs[i+1]
+            inp = old_inputs[i + 1]
             out = old_outputs[i]
 
             input_is_from_gpu = (inp.owner and
@@ -688,6 +695,9 @@ def local_gpu_conv(node):
     out.values_eq_approx = values_eq_approx
     return [out]
 
+# Register this here so that it goes after 'local_gpu_conv'
+register_opt()(conv_groupopt)
+
 
 @register_opt("low_memory")
 @local_optimizer([GpuCAReduceCuda])
@@ -787,8 +797,8 @@ def local_scan_to_gpua(node):
         scan_outs = [safe_to_gpu(x) for x in node.op.outputs]
     scan_outs = scan_utils.clone(
         scan_outs,
-        replace=zip(node.op.inputs,
-                    [safe_to_cpu(x) for x in scan_ins]))
+        replace=list(zip(node.op.inputs,
+                         (safe_to_cpu(x) for x in scan_ins))))
 
     # We need to construct the hash here, because scan
     # __init__ does not know about the gpu and can not
