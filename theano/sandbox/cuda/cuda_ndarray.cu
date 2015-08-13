@@ -9,8 +9,12 @@
 
 #include "cuda_ndarray.cuh"
 
-#include "cumem.h"
-#include "cumem.cpp"
+#ifndef CNMEM_DLLEXPORT
+#define CNMEM_DLLEXPORT
+#endif
+
+#include "cnmem.h"
+#include "cnmem.cpp"
 
 //If true, when there is a gpu malloc or free error, we print the size of allocated memory on the device.
 #define COMPUTE_GPU_MEM_USED 0
@@ -30,22 +34,8 @@
 //if you want this to work.
 #define PRECHECK_ERROR 0
 
-//If true, we release the GIL around blocking GPU calls, to allow other Python
-//threads to run in the meantime. For a single-threaded program, the overhead
-//is neglectible (about 20ms for 1 million GIL release/reclaim cycles). Can
-//still be overridden on compilation with -DRELEASE_GIL=0 in nvcc.flags.
-#ifndef RELEASE_GIL
-#define RELEASE_GIL 1
-#endif
-#if RELEASE_GIL
-#define CNDA_BEGIN_ALLOW_THREADS Py_BEGIN_ALLOW_THREADS
-#define CNDA_END_ALLOW_THREADS Py_END_ALLOW_THREADS
-#else
-#define CNDA_BEGIN_ALLOW_THREADS
-#define CNDA_END_ALLOW_THREADS
-#endif
-
 cublasHandle_t handle = NULL;
+int* err_var = NULL;
 
 /////////////////////////
 // Alloc and Free
@@ -85,20 +75,19 @@ void * device_malloc(size_t size)
 }
 
 ///@TODO: thejaswi: link this option to a theano config variable?
-static bool g_use_cumem = false;
+static bool g_use_cnmem = false;
 static const int g_max_devices = 8;
-int initCumem(int card_number_provided, int card_nb) {
-    static bool cumemInitialized = false;
-    if(cumemInitialized) {
+int initCnmem(int card_number_provided, int card_nb, size_t mem) {
+    static bool cnmemInitialized = false;
+    if(cnmemInitialized) {
         return 0;
     }
     // On stderr to be at the same place as "Using gpu device..."
-    fprintf(stderr, "Initializing cumem...\n");
     int numDevices = 0;
-    cumemDevice_t devices[g_max_devices];
+    cnmemDevice_t devices[g_max_devices];
     if(cudaGetDeviceCount(&numDevices) != cudaSuccess) {
         PyErr_Format(PyExc_RuntimeError,
-                     "initCumem: 'cudaGetDeviceCount' failed! Reason=%s\n",
+                     "initCnmem: 'cudaGetDeviceCount' failed! Reason=%s\n",
                      cudaGetErrorString(cudaGetLastError()));
         return -1;
     }
@@ -106,34 +95,30 @@ int initCumem(int card_number_provided, int card_nb) {
         numDevices = 1;
         int i = 0;
         devices[i].device = card_nb;
-        ///@TODO: thejaswi: support for choosing mem size to be allocated before-hand?
-        devices[i].size = 0;
+        devices[i].size = mem;
         ///@TODO: thejaswi: add support for multiple streams
         devices[i].numStreams = 0;
         devices[i].streams = NULL;
-        devices[i].granularity = 0;
-
+        devices[i].streamSizes = NULL;
     }else{
         for(int i=0;i<numDevices;++i) {
             devices[i].device = i;
-            ///@TODO: thejaswi: support for choosing mem size to be allocated before-hand?
-            devices[i].size = 0;
+            devices[i].size = mem;
             ///@TODO: thejaswi: add support for multiple streams
             devices[i].numStreams = 0;
             devices[i].streams = NULL;
-            devices[i].granularity = 0;
         }
     }
 
-    ///@TODO: thejaswi: passing custom cumem flags?
-    cumemStatus_t status = cumemInit(numDevices, devices, CUMEM_FLAGS_DEFAULT);
-    if(status != CUMEM_STATUS_SUCCESS) {
+    ///@TODO: thejaswi: passing custom cnmem flags?
+    cnmemStatus_t status = cnmemInit(numDevices, devices, CNMEM_FLAGS_DEFAULT);
+    if(status != CNMEM_STATUS_SUCCESS) {
         PyErr_Format(PyExc_RuntimeError,
-                     "initCumem: cumemInit call failed! Reason=%s. numdev=%d\n",
-                     cumemGetErrorString(status), numDevices);
+                     "initCnmem: cnmemInit call failed! Reason=%s. numdev=%d\n",
+                     cnmemGetErrorString(status), numDevices);
         return -1;
     }
-    cumemInitialized = true;
+    cnmemInitialized = true;
     return 0;
 }
 
@@ -152,12 +137,13 @@ void * device_malloc(size_t size, int verbose)
     #endif
     void * rval=NULL;
     ///@TODO: thejaswi: support for multiple-streams?
-    if(g_use_cumem) {
-        cumemStatus_t status = cumemMalloc(&rval, size, NULL);
-        if(status != CUMEM_STATUS_SUCCESS) {
+    if(g_use_cnmem) {
+        cnmemStatus_t status = CNMEM_STATUS_SUCCESS;
+        status = cnmemMalloc(&rval, size, NULL);
+        if(status != CNMEM_STATUS_SUCCESS) {
             PyErr_Format(PyExc_MemoryError,
                          "Error allocating %zd bytes of device memory (%s).",
-                         size, cumemGetErrorString(status));
+                         size, cnmemGetErrorString(status));
             return NULL;
         }
     }
@@ -285,11 +271,11 @@ int device_free(void *ptr)
     }
 
     ///@TODO: thejaswi: multi-stream support
-    if(g_use_cumem) {
-        cumemStatus_t status = cumemFree(ptr, NULL);
-        if(status != CUMEM_STATUS_SUCCESS) {
-            fprintf(stderr, "device_free: cumemFree call failed! Reason=%s\n",
-                    cumemGetErrorString(status));
+    if(g_use_cnmem) {
+        cnmemStatus_t status = cnmemFree(ptr, NULL);
+        if(status != CNMEM_STATUS_SUCCESS) {
+            fprintf(stderr, "device_free: cnmemFree call failed! Reason=%s\n",
+                    cnmemGetErrorString(status));
         }
     }
     else {
@@ -639,17 +625,20 @@ PyObject * CudaNdarray_CreateArrayObj(CudaNdarray * self, PyObject *args)
 
     npy_intp rval_size = PyArray_SIZE(rval);
     void *rval_data = PyArray_DATA(rval);
-    cublasStatus_t err;
-    CNDA_BEGIN_ALLOW_THREADS
-    err = cublasGetVector(rval_size, sizeof(real),
-                          contiguous_self->devdata, 1,
-                          rval_data, 1);
-    //CNDA_THREAD_SYNC;  // unneeded because cublasGetVector is blocking anyway
-    CNDA_END_ALLOW_THREADS
+    cudaError_t err;
+    CNDA_BEGIN_ALLOW_THREADS;
 
-    if (CUBLAS_STATUS_SUCCESS != err)
+    err = cudaMemcpy(rval_data, contiguous_self->devdata,
+                     rval_size * sizeof(real),
+                     cudaMemcpyDeviceToHost
+                     );
+    //CNDA_THREAD_SYNC;  // unneeded because cudaMemcpy is blocking anyway
+    CNDA_END_ALLOW_THREADS;
+
+    if (cudaSuccess != err)
     {
-        PyErr_SetString(PyExc_RuntimeError, "error copying data to host");
+        PyErr_Format(PyExc_RuntimeError, "error (%s)copying data to host",
+                     cudaGetErrorString(err));
         Py_DECREF(rval);
         rval = NULL;
     }
@@ -949,8 +938,8 @@ PyObject * CudaNdarray_Reshape(CudaNdarray * self, PyObject * shape)
                 free(rval_dims);
                 return NULL;
             }
-            if(rval_dims[i]<=0){
-                PyErr_Format(PyExc_ValueError, "Reshape has invalid dimension %i (must be >0)",rval_dims[i]);
+            if(rval_dims[i]<0){
+                PyErr_Format(PyExc_ValueError, "Reshape has invalid dimension %i (must be >=0)",rval_dims[i]);
                 free(rval_dims);
                 return NULL;
             }
@@ -1053,13 +1042,6 @@ __global__ void k_take_3(const int d0, const int d1, const int d2,
         }
     }
 }
-
-// Pointor to 1 int on the device
-// Used in CudaNdarray_TakeFrom to tell that there is an out of bound error
-// When it is allocated, it should always be 0
-// So if there is an error, we must reset it to 0 BEFORE we raise the error
-// This prevent us from setting it to 0 before each use
-static int* err_var = NULL;
 
 // We try to be similar to the PyArray_TakeFrom function
 //http://docs.scipy.org/doc/numpy/reference/c-api.array.html
@@ -1241,30 +1223,7 @@ CudaNdarray_TakeFrom(CudaNdarray * self, PyObject *args){
     k3 = k_take_3<CPY>;
 
     // Create the memory place that will store the error information.
-    if (err_var == NULL) {
-        err_var = (int*)device_malloc(sizeof(int));
-        if (!err_var) { // PyErr set by device_malloc
-            Py_DECREF(indices);
-            Py_DECREF(out);
-            free(dims);
-            return NULL;
-        }
-        cudaError_t err = cudaMemset((void*)err_var, 0, sizeof(int));
-        if (cudaSuccess != err) {
-            // Clear the error flag, cudaMemset doesn't do it.
-            // Currently this returns the same thing as err, but if in future
-            // it returns something else I still don't see why we should ignore
-            // it.  All we want to do here is reset the flag.
-            cudaGetLastError();
-            PyErr_Format(PyExc_RuntimeError,
-                         "Error setting device error code to 0. %s",
-                         cudaGetErrorString(err));
-            Py_DECREF(indices);
-            Py_DECREF(out);
-            free(dims);
-            return NULL;
-        }
-    }
+    if(init_err_var() != 0) return NULL;
 
     dim3 n_blocks(std::min(CudaNdarray_HOST_DIMS(out)[0],65535),1,1);
     if(CudaNdarray_HOST_DIMS(out)[0] == 0){
@@ -1376,46 +1335,13 @@ CudaNdarray_TakeFrom(CudaNdarray * self, PyObject *args){
         Py_DECREF(out);
         return NULL;
     }
-    //-10 could be any value different then 0.
-    int cpu_err_var=-10;
 
-    CNDA_BEGIN_ALLOW_THREADS
-    // As we execute cudaMemcpy on the default stream, it waits for all
-    // kernels (on all streams) to be finished before starting to copy
-    err = cudaMemcpy(&cpu_err_var, err_var, sizeof(int),
-                     cudaMemcpyDeviceToHost);
-    CNDA_END_ALLOW_THREADS
-    if (cudaSuccess != err) {
-        PyErr_Format(
-            PyExc_RuntimeError,
-            "Cuda error: %s: %s when trying to get the error value.\n",
-            "CudaNdarray_TakeFrom",
-            cudaGetErrorString(err));
-        Py_DECREF(indices);
-        Py_DECREF(out);
-        return NULL;
-    }
-
-    if (cpu_err_var != 0) {
-        PyErr_Format(
-            PyExc_IndexError,
-            "CudaNdarray_TakeFrom: One of the index value is out of bound. Error code: %i.\n",
-            cpu_err_var);
-        // Must reset it to 0 to don't reset it before each use.
-        err = cudaMemset((void*)err_var, 0, sizeof(int));
-        if (cudaSuccess != err) {
-            PyErr_Format(PyExc_MemoryError, "Error setting device error code to 0 after having an index error. %s", cudaGetErrorString(err));
-            Py_DECREF(indices);
-            Py_DECREF(out);
-            return NULL;
-        }
-        Py_DECREF(indices);
-        Py_DECREF(out);
-        return NULL;
-
-    }
-
+    int index_err = check_err_var();
     Py_DECREF(indices);
+    if (index_err != 0) {
+        Py_DECREF(out);
+        return NULL;
+    }
 
     if (verbose) printf("TAKE SUCCEDED\n");
     return (PyObject *)out;
@@ -3211,22 +3137,23 @@ CudaNdarray_ptr_int_size(PyObject* _unused, PyObject* args)
 static int cublas_init();
 static void cublas_shutdown();
 // Initialize the gpu.
-// Takes two optional parameters, the device number and if we should use cumem.
+// Takes two optional parameters, the device number and if we should use cnmem.
 // If the device number is provided, it sets that device to be the active device.
 // If not provided (usually just to test whether the gpu is available at all),
 // it does not set an active device.
 // Raises EnvironmentError or ValueError (as appropriate) if the initialization failed.
-// cumem is threaded like a bool. If converted to 0, don't use cumem. Otherwise, use it.
+// cnmem is threaded like a bool. If converted to 0, don't use cnmem. Otherwise, use it.
 PyObject *
 CudaNdarray_gpu_init(PyObject* _unused, PyObject* args)
 {
     int card_nb = 0;
     int card_number_provided = 1;
-    int cumem = 0; // 0 False, 1 True
+    float cnmem = 0; // Theano flag lib.cnmem
     // if we're given something wildly invalid, this will throw a TypeError
-    PyArg_ParseTuple(args, "|ii", &card_nb, &cumem);
-    if(cumem)
-        g_use_cumem = true;
+    if(!PyArg_ParseTuple(args, "|if", &card_nb, &cnmem))
+        return NULL;
+    if(cnmem)
+        g_use_cnmem = true;
 
     if(PyTuple_Size(args) == 0) {
         card_number_provided = 0;
@@ -3281,8 +3208,31 @@ CudaNdarray_gpu_init(PyObject* _unused, PyObject* args)
         if (cublas_init() == -1)
             return NULL;
     }
-    if(card_number_provided && g_use_cumem) {
-        if(initCumem(card_number_provided, card_nb) == -1){
+    if(card_number_provided && g_use_cnmem) {
+        size_t mem = 0;
+        if (cnmem > 1)
+            mem = cnmem * 1024 * 1024;
+        else{
+            // Clip to 98.5% to let memory for the driver.
+            if (cnmem > .985){
+                cnmem = .985;
+            }
+            size_t free = 0, total = 0;
+            cudaError_t err = cudaMemGetInfo(&free, &total);
+            if (err != cudaSuccess){
+                // Clear the error flag, cudaMemGetInfo doesn't do it.
+                // Currently this returns the same thing as err, but if in future
+                // it returns something else I still don't see why we should ignore
+                // it.  All we want to do here is reset the flag.
+                cudaGetLastError();
+                PyErr_Format(PyExc_RuntimeError,
+                             "Error while getting memory info about the gpu: %s",
+                             cudaGetErrorString(err));
+                return NULL;
+            }
+            mem = total * cnmem;
+        }
+        if(initCnmem(card_number_provided, card_nb, mem) == -1){
             return NULL;
         }
     }
@@ -3317,13 +3267,12 @@ CudaNdarray_gpu_shutdown(PyObject* _unused, PyObject* _unused_args) {
     // Don't handle errors here
     cublas_shutdown();
     g_gpu_context_active = 0; // context has now been closed down
-    if(g_use_cumem) {
-        fprintf(stderr, "Shutting down cumem...\n");
-        cumemStatus_t status = cumemFinalize();
-        if(status != CUMEM_STATUS_SUCCESS) {
-            fprintf(stderr, "CudaNdarray_gpu_shutdown: cumemFinalize failed! Reason=%s\n",
-                    cumemGetErrorString(status));
-            if(status == CUMEM_STATUS_CUDA_ERROR) {
+    if(g_use_cnmem) {
+        cnmemStatus_t status = cnmemFinalize();
+        if(status != CNMEM_STATUS_SUCCESS) {
+            fprintf(stderr, "CudaNdarray_gpu_shutdown: cnmemFinalize failed! Reason=%s\n",
+                    cnmemGetErrorString(status));
+            if(status == CNMEM_STATUS_CUDA_ERROR) {
                 fprintf(stderr, "  Cuda-Reason=%s\n",
                         cudaGetErrorString(cudaGetLastError()));
             }
@@ -3808,20 +3757,19 @@ CudaNdarray_CopyFromArray(CudaNdarray * self, PyArrayObject*obj)
     }
     npy_intp py_src_size = PyArray_SIZE(py_src);
     void *py_src_data = PyArray_DATA(py_src);
-    cublasStatus_t cerr;
-    CNDA_BEGIN_ALLOW_THREADS
-    cerr = cublasSetVector(py_src_size,
-                           sizeof(real),
-                           py_src_data, 1,
-                           self->devdata, 1);
-    //CNDA_THREAD_SYNC;  // unneeded because cublasSetVector is blocking anyway
-    CNDA_END_ALLOW_THREADS
-    if (CUBLAS_STATUS_SUCCESS != cerr)
+    cudaError_t cerr;
+    CNDA_BEGIN_ALLOW_THREADS;
+    cerr = cudaMemcpy(self->devdata, py_src_data,
+                      py_src_size * sizeof(real),
+                      cudaMemcpyHostToDevice);
+    //CNDA_THREAD_SYNC;  // unneeded because cudaMemcpy is blocking anyway
+    CNDA_END_ALLOW_THREADS;
+    if (cudaSuccess != cerr)
     {
         PyErr_Format(PyExc_RuntimeError,
-                     "CUBLAS error '%s' while copying %lli data element"
+                     "Cuda error '%s' while copying %lli data element"
                      " to device memory",
-                     cublasGetErrorString(cerr),
+                     cudaGetErrorString(cerr),
                      (long long)py_src_size);
         Py_DECREF(py_src);
         return -1;
