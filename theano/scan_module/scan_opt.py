@@ -1,5 +1,5 @@
 """
-This module provides optimizations for scan
+This module provides optimizations for scan.
 The Optimization provided in this file:
 
 local opt: remove_constants_and_unused_inputs_scan,
@@ -48,9 +48,8 @@ scan_eqopt2 -> They are all global optimizer. (in2out convert local to global).
                in2out(scan_merge_inouts),
                ScanSaveMem,
                in2out(remove_constants_and_unused_inputs_scan3)
+
 """
-
-
 __docformat__ = 'restructedtext en'
 __authors__ = ("Razvan Pascanu "
                "Frederic Bastien "
@@ -90,7 +89,7 @@ _logger = logging.getLogger('theano.scan_module.scan_opt')
 list_opt_slice = [tensor.opt.local_abs_merge,
                   tensor.opt.local_mul_switch_sink,
                   tensor.opt.local_upcast_elemwise_constant_inputs,
-                  tensor.opt.local_remove_switch_const_cond,
+                  tensor.opt.local_useless_switch,
                   tensor.opt.constant_folding]
 
 
@@ -104,7 +103,7 @@ def info(*msg):
 
 @gof.local_optimizer([scan_op.Scan])
 def remove_constants_and_unused_inputs_scan(node):
-    '''
+    """
     Move constants into the inner graph, and remove unused inputs.
 
     Constants that are in the outer graph are represented by a free symbolic
@@ -112,7 +111,8 @@ def remove_constants_and_unused_inputs_scan(node):
     constant-folding can happen in the inner graph.
     This is applied only on sequences and non-sequences,
     not on initial states.
-    '''
+
+    """
     if not isinstance(node.op, scan_op.Scan):
         return False
     op = node.op
@@ -212,9 +212,10 @@ def remove_constants_and_unused_inputs_scan(node):
 # It should be possible to change it to a local opt.
 class PushOutNonSeqScan(gof.Optimizer):
     """
-    A global optimizer for pushing out the variables inside the scan that
-    are not used by the scan.
+    A global optimizer for pushing out the variables inside the scan that depend
+    only on non-sequences.
     """
+
     def __init__(self):
         gof.Optimizer.__init__(self)
 
@@ -233,6 +234,7 @@ class PushOutNonSeqScan(gof.Optimizer):
         By default they are not ordered for efficiency reasons. Take care
         and make sure of changing them with their Ordered counterparts if you
         need to iterate over these variables.
+
         """
         # this flag tells if there was any change during the last iterations
         clean_inputs, clean_outputs = scan_utils.reconstruct_graph(
@@ -408,9 +410,10 @@ class PushOutNonSeqScan(gof.Optimizer):
 # It should be possible to change it to a local opt.
 class PushOutSeqScan(gof.Optimizer):
     """
-    A global optimizer for pushing out the input variables that are not being
-    used inside the scan and provided in the sequences.
+    A global optimizer for pushing out the variables inside the
+    scan that depend only on constants and sequences.
     """
+
     def __init__(self):
         gof.Optimizer.__init__(self)
 
@@ -429,6 +432,7 @@ class PushOutSeqScan(gof.Optimizer):
         By default they are not ordered for efficiency reasons. Take care
         and make sure of changing them to Ordered versions if you need to
         iterate over those variables.
+
         """
         # this flag tells if there was any change during the last iterations
         clean_inputs, clean_outputs = scan_utils.reconstruct_graph(
@@ -654,6 +658,7 @@ class PushOutScanOutput(gof.Optimizer):
     This is an optimization that can push operations performed
     at the end of the inner graph of scan to outside of scan.
     """
+
     def __init__(self):
         gof.Optimizer.__init__(self)
 
@@ -701,8 +706,8 @@ class PushOutScanOutput(gof.Optimizer):
                 The Dot product is pushed out of the scan and its inputs are
                 now the original matrix and a new matrix obtained by
                 concatenating the vectors into a matrix.
-                """
 
+                """
                 # Ensure that the output of the Dot is used in the outer
                 # graph to avoid apply the optimization needlessly
                 dot_out_nitsot_idx = args.inner_out_nit_sot.index(nd.out)
@@ -715,6 +720,7 @@ class PushOutScanOutput(gof.Optimizer):
                 non-sequence input to scan and that the other input is a
                 vector and either an sequence input to scan or the result
                 of computation in the inner function of scan.
+
                 """
                 valid_inputs = False
                 idx_matrix_input = -1
@@ -863,6 +869,7 @@ class PushOutScanOutput(gof.Optimizer):
         nit_sot output has only one client and that client is a Subtensor
         instance that takes only the last step (last element along the first
         axis).
+
         """
         idx = scan_args.inner_out_sit_sot.index(var)
         outer_var = scan_args.outer_out_sit_sot[idx]
@@ -988,7 +995,11 @@ class PushOutScanOutput(gof.Optimizer):
 
 
 class ScanInplaceOptimizer(Optimizer):
-    """Graph optimizer for Scan(makes it run inplace)"""
+    """
+    Graph optimizer for Scan (makes it run inplace).
+
+    """
+
     def __init__(self, typeConstructor=None, gpu_flag=False, gpua_flag=False):
         Optimizer.__init__(self)
         self.typeConstructor = typeConstructor
@@ -999,6 +1010,61 @@ class ScanInplaceOptimizer(Optimizer):
         fgraph.attach_feature(toolbox.ReplaceValidate())
         fgraph.attach_feature(DestroyHandler())
 
+    def attempt_scan_inplace(self, fgraph, node, output_indices):
+        """Attempts to replace a Scan node by one which computes the specified
+        outputs inplace.
+
+        Parameters
+        ----------
+        fgraph : FunctionGraph
+            Function graph in which to attempt the replacement
+        node : Apply node
+            Scan node to replace by an inplace version
+        output_indices : list of integers
+            Indices of the outputs to attempt to compute inplace
+        """
+
+        op = node.op
+
+        info = copy.deepcopy(op.info)
+        if 'destroy_map' not in info:
+            info['destroy_map'] = OrderedDict()
+
+        for out_idx in output_indices:
+            info['destroy_map'][out_idx] = [out_idx + 1 + op.info['n_seqs']]
+
+        # inputs corresponding to sequences and n_steps
+        ls_begin = node.inputs[:1 + op.n_seqs]
+        ls = op.outer_mitmot(node.inputs)
+        ls += op.outer_mitsot(node.inputs)
+        ls += op.outer_sitsot(node.inputs)
+        ls_end = op.outer_shared(node.inputs)
+        ls_end += op.outer_nitsot(node.inputs)
+        ls_end += op.outer_non_seqs(node.inputs)
+
+        n_outs = len(ls)
+        for idx in xrange(n_outs):
+            if ls[idx] in ls[:idx]:
+                ls[idx] = deep_copy_op(ls[idx])
+
+        inputs = ls_begin + ls + ls_end
+        new_op = scan_op.Scan(op.inputs,
+                              op.outputs,
+                              info,
+                              typeConstructor=self.typeConstructor)
+
+        # Do not call make_node for test_value
+        new_outs = new_op(*inputs, **dict(return_list=True))
+        try:
+            fgraph.replace_all_validate_remove(
+                list(zip(node.outputs, new_outs)),
+                remove=[node],
+                reason='scanOp_make_inplace')
+            return new_outs[0].owner
+        except InconsistencyError:
+            # Failed moving output to be computed inplace
+            return node
+
     def apply(self, fgraph):
 
         nodes = fgraph.toposort()
@@ -1007,52 +1073,32 @@ class ScanInplaceOptimizer(Optimizer):
                           x.op.info['gpu'] == self.gpu_flag and
                           x.op.info['gpua'] == self.gpua_flag)]
         for scan_idx in xrange(len(scan_nodes)):
-            node = scan_nodes[scan_idx]
-            op = node.op
+
+            # First attempt to make the Scan compute every recurrent output
+            # inplace. If that fails, go through these outputs individually,
+            # trying each of them
+            original_node = scan_nodes[scan_idx]
+            op = original_node.op
             n_outs = (op.info['n_mit_mot'] +
                       op.info['n_mit_sot'] +
                       op.info['n_sit_sot'])
-            for pos in xrange(n_outs):
-                info = copy.deepcopy(op.info)
-                if not 'destroy_map' in info:
-                    info['destroy_map'] = OrderedDict()
 
-                info['destroy_map'][pos] = [pos + 1 + op.info['n_seqs']]
-                # inputs corresponding to sequences and n_steps
-                ls_begin = node.inputs[:1 + op.n_seqs]
-                ls = op.outer_mitmot(node.inputs)
-                ls += op.outer_mitsot(node.inputs)
-                ls += op.outer_sitsot(node.inputs)
-                ls_end = op.outer_shared(node.inputs)
-                ls_end += op.outer_nitsot(node.inputs)
-                ls_end += op.outer_non_seqs(node.inputs)
-                n_outs = len(ls)
-                for idx in xrange(n_outs):
-                    if ls[idx] in ls[:idx]:
-                        ls[idx] = deep_copy_op(ls[idx])
+            node = self.attempt_scan_inplace(fgraph, scan_nodes[scan_idx],
+                                             range(n_outs))
 
-                inputs = ls_begin + ls + ls_end
-                new_op = scan_op.Scan(op.inputs,
-                                      op.outputs,
-                                      info,
-                                      typeConstructor=self.typeConstructor)
-
-                # Do not call make_node for test_value
-                new_outs = new_op(*inputs, **dict(return_list=True))
-                try:
-                    fgraph.replace_all_validate_remove(
-                        list(zip(node.outputs, new_outs)),
-                        remove=[node],
-                        reason='scanOp_make_inplace')
-                    op = new_op
-                    node = new_outs[0].owner
-                except InconsistencyError as e:
-                    # Failed moving output to be comptued inplace
-                    pass
+            if node is original_node:
+                # Making the scan compute all recurrent outputs inplace has
+                # failed. Attempt all recurrent outputs individually.
+                for pos in xrange(n_outs):
+                    node = self.attempt_scan_inplace(fgraph, node, [pos])
 
 
 class ScanSaveMem(gof.Optimizer):
-    """ Graph Optimizer that reduces scan memory consumption """
+    """
+    Graph Optimizer that reduces scan memory consumption.
+
+    """
+
     def __init__(self):
         gof.Optimizer.__init__(self)
 
@@ -1258,6 +1304,14 @@ class ScanSaveMem(gof.Optimizer):
                 real_steps = None
             nw_steps = select_min(select_max(sym_steps, real_steps),
                                   node.inputs[0])
+
+            # Make sure the ScanSaveMem optimization never makes the new
+            # number of steps to be 0 (this could happen, for instance, if
+            # the optimization detects that the outputs of the Scan go through
+            # subtensor nodes that end up taking no elements) because Scan with
+            # 0 iterations are not supported. Make sure the new number of steps
+            # is at least 1.
+            nw_steps = select_max(nw_steps, 1)
         else:
             nw_steps = node.inputs[0]
             global_nsteps = None
@@ -1596,7 +1650,11 @@ class ScanSaveMem(gof.Optimizer):
 
 
 class ScanMerge(gof.Optimizer):
-    """ Graph Optimizer that merges different scan ops """
+    """
+    Graph Optimizer that merges different scan ops.
+
+    """
+
     def add_requirements(self, fgraph):
         fgraph.attach_feature(gof.toolbox.ReplaceValidate())
 
@@ -1775,6 +1833,7 @@ class ScanMerge(gof.Optimizer):
         over the same number of steps, have the same condition (if any),
         have the same value for truncate_gradient, and have the same mode.
         Questionable, we should also consider profile ?
+
         """
         rep = set_nodes[0]
         if rep.op.as_while != node.op.as_while:
@@ -1844,13 +1903,19 @@ class ScanMerge(gof.Optimizer):
 
 
 def has_duplicates(l):
-    """returns true if l has any duplicates (according to __eq__)."""
+    """
+    Returns true if l has any duplicates (according to __eq__).
+
+    """
     return len(set(l)) < len(l)
 
 
 def make_equiv(lo, li):
-    """builds a dictionary of equivalences between inner inputs based on
-    the equivalence of their corresponding outer inputs."""
+    """
+    Builds a dictionary of equivalences between inner inputs based on
+    the equivalence of their corresponding outer inputs.
+
+    """
     seeno = OrderedDict()
     left = []
     right = []
@@ -2026,7 +2091,11 @@ def scan_merge_inouts(node):
 
 
 class PushOutDot1(gof.Optimizer):
-    """Graph optimizer for Scan(makes it run inplace)"""
+    """
+    Graph optimizer for Scan(makes it run inplace).
+
+    """
+
     def __init__(self):
         Optimizer.__init__(self)
 

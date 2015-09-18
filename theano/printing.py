@@ -132,14 +132,8 @@ def debugprint(obj, depth=-1, print_type=False,
                             obj)
 
     scan_ops = []
-    for r, p in zip(results_to_print, profile_list):
-        # Add the parent scan op to the list as well
-        if (hasattr(r.owner, 'op') and
-                isinstance(r.owner.op, theano.scan_module.scan_op.Scan)):
-                    scan_ops.append(r)
-
-        if p is not None:
-            print("""
+    if any([p for p in profile_list if p is not None and p.fct_callcount > 0]):
+        print("""
 Timing Info
 -----------
 --> <time> <% time> - <total time> <% total time>'
@@ -156,6 +150,12 @@ N.B.:
   loose upper bound. Their intended use is to help rule out potential nodes
   to remove when optimizing a graph because their <total time> is very low.
 """, file=_file)
+
+    for r, p in zip(results_to_print, profile_list):
+        # Add the parent scan op to the list as well
+        if (hasattr(r.owner, 'op') and
+                isinstance(r.owner.op, theano.scan_module.scan_op.Scan)):
+                    scan_ops.append(r)
 
         debugmode.debugprint(r, depth=depth, done=done, print_type=print_type,
                              file=_file, order=order, ids=ids,
@@ -586,7 +586,8 @@ default_colorCodes = {'GpuFromHost': 'red',
                       'IfElse': 'magenta',
                       'Elemwise': '#FFAABB',  # dark pink
                       'Subtensor': '#FFAAFF',  # purple
-                      'Alloc': '#FFAA22'}  # orange
+                      'Alloc': '#FFAA22',  # orange
+                      'Output': 'blue'}
 
 
 def pydotprint(fct, outfile=None,
@@ -766,11 +767,9 @@ def pydotprint(fct, outfile=None,
             varstr = '%s %s' % (dstr, str(var.type))
         elif (var in input_update and
               input_update[var].name is not None):
-            if var_with_name_simple:
-                varstr = input_update[var].variable.name
-            else:
-                varstr = (input_update[var].variable.name +
-                          str(var.type))
+            varstr = input_update[var].name
+            if not var_with_name_simple:
+                varstr += str(var.type)
         else:
             # a var id is needed as otherwise var with the same type will be
             # merged in the graph.
@@ -889,7 +888,7 @@ def pydotprint(fct, outfile=None,
                 param['label'] = label
             if hasattr(node.op, 'view_map') and idx in reduce(
                     list.__add__, node.op.view_map.values(), []):
-                    param['color'] = 'blue'
+                    param['color'] = colorCodes['Output']
             elif hasattr(node.op, 'destroy_map') and idx in reduce(
                     list.__add__, node.op.destroy_map.values(), []):
                         param['color'] = 'red'
@@ -939,9 +938,9 @@ def pydotprint(fct, outfile=None,
                 if high_contrast:
                     g.add_node(pd.Node(varid, style='filled',
                                        label=varstr,
-                                       fillcolor='blue', shape=var_shape))
+                                       fillcolor=colorCodes['Output'], shape=var_shape))
                 else:
-                    g.add_node(pd.Node(varid, color='blue',
+                    g.add_node(pd.Node(varid, color=colorCodes['Output'],
                                        label=varstr,
                                        shape=var_shape))
             elif len(var.clients) == 0:
@@ -971,7 +970,7 @@ def pydotprint(fct, outfile=None,
     for sha, up in input_update.items():
         _, shaid = var_name(sha)
         _, upid = var_name(up)
-        g.add_edge(pd.Edge(shaid, upid, label="UPDATE", color="blue"))
+        g.add_edge(pd.Edge(shaid, upid, label="UPDATE", color=colorCodes['Output']))
 
     if cond_highlight:
         g.add_subgraph(c1)
@@ -1135,7 +1134,7 @@ def pydotprint_variables(vars,
                 my_list[nd] = varastr
                 color = None
                 if nd in vars:
-                    color = 'blue'
+                    color = colorCodes['Output']
                 elif nd in orphanes:
                     color = 'gray'
                 if color is None:

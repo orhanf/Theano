@@ -3,10 +3,12 @@ from __future__ import print_function
 import six.moves.builtins as builtins
 import logging
 import time
+import traceback
 import warnings
 
 import numpy  # for numeric_grad
 from six import itervalues
+from six.moves import StringIO
 
 import theano
 
@@ -515,6 +517,17 @@ def grad(cost, wrt, consider_constant=None,
             elif disconnected_inputs == 'warn':
                 warnings.warn(message, stacklevel=2)
             elif disconnected_inputs == 'raise':
+                # Add the var trace
+                tr = getattr(var.tag, 'trace', [])
+                if len(tr) > 0:
+                    message += "\nBacktrace when the node is created:\n"
+
+                    # Print separate message for each element in the list of batcktraces
+                    sio = StringIO()
+                    for subtr in tr:
+                        traceback.print_list(subtr, sio)
+                    message += str(sio.getvalue())
+
                 raise DisconnectedInputError(message)
             else:
                 raise ValueError("Invalid value for keyword "
@@ -1525,8 +1538,8 @@ def verify_grad(fun, pt, n_tests=2, rng=None, eps=None,
 
     Example:
         >>> verify_grad(theano.tensor.tanh,
-                        (numpy.asarray([[2,3,4], [-1, 3.3, 9.9]]),),
-                        rng=numpy.random)
+        ...             (numpy.asarray([[2,3,4], [-1, 3.3, 9.9]]),),
+        ...             rng=numpy.random)
 
     Raises an Exception if the difference between the analytic gradient and
     numerical gradient (computed through the Finite Difference Method) of a

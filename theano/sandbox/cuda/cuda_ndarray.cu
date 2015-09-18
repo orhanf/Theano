@@ -2948,22 +2948,32 @@ PyObject *
 CudaNdarray_select_a_gpu(PyObject* _unused, PyObject* dummy)
 {
     void * rval = NULL;
+    cudaError_t err;
+    int num_gpus = 0;
 
-    cudaError_t err = cudaMalloc(&rval, 4);
+    err = cudaGetDeviceCount(&num_gpus);
     if (cudaSuccess != err){
         printf("ERR!\\n");
             PyErr_Format(PyExc_RuntimeError,
-                         "Not able to do basic stuff on the GPU (alloc of 4 bytes) (%s).",
+                         "Not able to get number of GPUs (%s).",
                          cudaGetErrorString(err));
             return NULL;
     }
-    err = cudaFree(rval);
+
+    for (int device = 0; device < num_gpus; device++) {
+        cudaSetDevice(device);
+        err = cudaDeviceSynchronize(); // << CUDA context gets created here.
+        cudaGetLastError(); // reset the error state     
+        if (cudaSuccess == err)
+            break;
+    }
+        
     if (cudaSuccess != err){
-        printf("ERR!\\n");
-            PyErr_Format(PyExc_RuntimeError,
-                         "Not able to do basic stuff on the GPU (cudaFree failed) (%s).",
-                         cudaGetErrorString(err));
-            return NULL;
+            printf("ERR!\\n");
+                PyErr_Format(PyExc_RuntimeError,
+                             "Not able to select available GPU from %d cards (%s).",
+                             num_gpus, cudaGetErrorString(err));
+                return NULL;
     }
 
     Py_INCREF(Py_None);
@@ -3213,9 +3223,10 @@ CudaNdarray_gpu_init(PyObject* _unused, PyObject* args)
         if (cnmem > 1)
             mem = cnmem * 1024 * 1024;
         else{
-            // Clip to 98.5% to let memory for the driver.
-            if (cnmem > .985){
-                cnmem = .985;
+            // Clip to 98% to let memory for the driver.
+            // 98.5% didn't worked in some cases.
+            if (cnmem > .98){
+                cnmem = .98;
             }
             size_t free = 0, total = 0;
             cudaError_t err = cudaMemGetInfo(&free, &total);

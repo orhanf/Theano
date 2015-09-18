@@ -10,7 +10,7 @@ import theano.tensor as T
 import theano.tests.unittest_tools as utt
 from theano.sandbox.neighbours import images2neibs
 from theano.tensor.signal.downsample import max_pool_2d
-from theano.tensor.signal.downsample import DownsampleFactorMaxGrad
+from theano.tensor.signal.downsample import MaxPoolGrad, AveragePoolGrad
 
 from .. import dnn
 from ..basic_ops import GpuAllocEmpty
@@ -264,8 +264,12 @@ def test_pooling():
                               ignore_border=True, mode=mode)
             fc = theano.function([x], theano.grad(out.sum(), x),
                                  mode=mode_without_gpu)
-            assert any([isinstance(node.op, DownsampleFactorMaxGrad)
-                        for node in fc.maker.fgraph.toposort()])
+            if mode == 'max':
+                assert any([isinstance(node.op, MaxPoolGrad)
+                            for node in fc.maker.fgraph.toposort()])
+            else:
+                assert any([isinstance(node.op, AveragePoolGrad)
+                            for node in fc.maker.fgraph.toposort()])
             c_out = fc(data)
             assert numpy.allclose(c_out, g_out)
 
@@ -274,23 +278,30 @@ def test_pooling_opt():
     if not dnn.dnn_available():
         raise SkipTest(dnn.dnn_available.msg)
 
-    x = T.ftensor4()
+    x = T.fmatrix()
 
     f = theano.function(
         [x],
-        max_pool_2d(x, ds=(2, 2), ignore_border=True),
+        max_pool_2d(x, ds=(2, 2), mode='average_inc_pad',
+                    ignore_border=True),
         mode=mode_with_gpu)
 
     assert any([isinstance(n.op, dnn.GpuDnnPool)
                 for n in f.maker.fgraph.toposort()])
 
+    f(numpy.zeros((10, 10), dtype='float32'))
+
     f = theano.function(
         [x],
-        T.grad(max_pool_2d(x, ds=(2, 2), ignore_border=True).sum(), x),
+        T.grad(max_pool_2d(x, ds=(2, 2), mode='average_inc_pad',
+                           ignore_border=True).sum(),
+               x),
         mode=mode_with_gpu.including("cudnn"))
 
     assert any([isinstance(n.op, dnn.GpuDnnPoolGrad)
                 for n in f.maker.fgraph.toposort()])
+
+    f(numpy.zeros((10, 10), dtype='float32'))
 
 
 def test_dnn_tag():

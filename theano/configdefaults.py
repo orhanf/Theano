@@ -150,6 +150,7 @@ AddConfigVar(
     'mode',
     "Default compilation mode",
     EnumStr('Mode', 'ProfileMode', 'DebugMode', 'FAST_RUN',
+            'NanGuardMode',
             'FAST_COMPILE', 'PROFILE_MODE', 'DEBUG_MODE'),
     in_c_key=False)
 
@@ -535,7 +536,7 @@ AddConfigVar('unpickle_function',
 AddConfigVar(
     'reoptimize_unpickled_function',
     "Re-optimize the graph when a theano function is unpickled from the disk.",
-    BoolParam(True, allow_override=True),
+    BoolParam(False, allow_override=True),
     in_c_key=False)
 
 """Note to developers:
