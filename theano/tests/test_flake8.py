@@ -30,7 +30,6 @@ whitelist_flake8 = [
     "tests/test_gradient.py",
     "tests/test_config.py",
     "tests/diverse_tests.py",
-    "tests/test_ifelse.py",
     "tests/test_rop.py",
     "tests/test_2nd_order_grads.py",
     "tests/run_tests_in_batch.py",
@@ -160,11 +159,9 @@ whitelist_flake8 = [
     "sandbox/linalg/tests/test_linalg.py",
     "sandbox/gpuarray/basic_ops.py",
     "sandbox/gpuarray/nnet.py",
-    "sandbox/gpuarray/subtensor.py",
     "sandbox/gpuarray/elemwise.py",
     "sandbox/gpuarray/type.py",
     "sandbox/gpuarray/__init__.py",
-    "sandbox/gpuarray/blas.py",
     "sandbox/gpuarray/kernel_codegen.py",
     "sandbox/gpuarray/conv.py",
     "sandbox/gpuarray/neighbours.py",
@@ -207,6 +204,9 @@ whitelist_flake8 = [
     "gof/unify.py",
     "gof/__init__.py",
     "gof/sandbox/equilibrium.py",
+    "d3viz/__init__.py",
+    "d3viz/tests/test_d3viz.py",
+    "d3viz/tests/test_formatting.py"
 ]
 
 
