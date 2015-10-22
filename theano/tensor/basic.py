@@ -109,7 +109,8 @@ if 0:
     # - JB 20100226
     def as_cuda_or_tensor_variable(x, name=None, ndim=None):
         """
-        Do the same as_tensor_variable, but do not transfer the value on the gpu.
+        Do the same as_tensor_variable,
+        but do not transfer the value on the gpu.
         """
         if hasattr(x, '_as_CudaNdarrayVariable'):
             # TODO: pass name and ndim arguments
@@ -486,10 +487,10 @@ else:
     float32_rtol = 1e-5
 
     # defaults in numpy.allclose
+    # Don't be more strict then numpy rtol
+    # It cause useless error.
     float64_rtol = 1.0000000000000001e-05
     float64_atol = 1e-8
-    # more strict. Atleast float32 precision.
-    float64_rtol = 1.0000000000000001e-06
 
 
 def _get_atol_rtol(a, b):
@@ -516,7 +517,8 @@ def _allclose(a, b, rtol=None, atol=None):
     if atol is not None:
         atol_ = atol
 
-    # Work around bug in Numpy, see http://projects.scipy.org/numpy/ticket/1684
+    # Work around bug in Numpy, see
+    # http://projects.scipy.org/numpy/ticket/1684
     if str(b.dtype) in int_dtypes and (numpy.absolute(b) < 0).any():
         b = theano._asarray(b, dtype='float64')
 
@@ -1287,27 +1289,14 @@ class MaxAndArgmax(Op):
     def make_node(self, x, axis=None):
         x = _as_tensor_variable(x)
 
-        if isinstance(axis, (tuple, list)):
-            axis = [int(a) for a in axis]
-            if len(axis) != 1:
-                axis = list(axis)
-                for idx in xrange(len(axis)):
-                    if axis[idx] < 0:
-                        axis[idx] += x.type.ndim
-                axis.sort()
-                if axis == list(range(-x.type.ndim, 0, 1)):
-                    axis = list(range(x.type.ndim))
-                assert axis == list(range(x.type.ndim)), (
-                    "MaxAndArgmax does not support multiple"
-                    " axes. the max fct supports it. Got %s" % axis)
-                axis = None
-            else:
-                axis = axis[0]
-
         if isinstance(axis, (int, numpy.integer)):
-            axis = int(axis)
+            axis = [int(axis)]
         elif isinstance(axis, numpy.ndarray) and axis.ndim == 0:
-            axis = int(axis)
+            axis = [int(axis)]
+        elif isinstance(axis, (tuple, list, numpy.ndarray)):
+            axis = [int(a) for a in axis]
+            if axis == list(range(x.type.ndim)):
+                axis = None
         elif isinstance(axis, Variable):
             if NoneConst.equals(axis):
                 axis = None
@@ -1317,30 +1306,40 @@ class MaxAndArgmax(Op):
             else:
                 assert (axis.dtype.startswith("int") or
                         axis.dtype.startswith("uint"))
-                axis = int(axis.data)
-        # we make the axis all positive to make the infer_shape work
-        # with negative axis
-        if x.type.ndim > 0 and axis is not None:
-            if axis < 0:
-                if -axis > x.type.ndim:
-                    raise ValueError('axis out of range')
-                axis = x.type.ndim + axis
-        # Verify that the axis is valid.
-        all_axes = set()
-        if axis is not None:
-            if axis < 0 or axis >= x.type.ndim:
-                raise ValueError(
-                    'Invalid axis: %s (the number of dimensions of the '
-                    'input is: %s)' % (axis, x.type.ndim))
-            all_axes.add(axis)
+                if isinstance(axis.data, (int, numpy.integer)) or \
+                   (isinstance(axis.data, numpy.ndarray) and
+                        axis.data.ndim == 0):
+                    axis = [int(axis.data)]
+                elif isinstance(axis.data, (list, numpy.ndarray)):
+                    axis = [int(i) for i in axis.data]
+
+        # Make axis entries non-negative, and sort them
+        if isinstance(axis, list):
+            for idx in xrange(len(axis)):
+                if axis[idx] < 0:
+                    axis[idx] += x.type.ndim
+            axis.sort()
+
+        # Verify that axes are valid
+        all_axes = []
+        if isinstance(axis, list):
+            for ax in axis:
+                if ax < 0 or ax >= x.type.ndim:
+                    raise ValueError(
+                        'Invalid axis: %s (the number of dimensions of the '
+                        'input is: %s)' % (ax, x.type.ndim))
+                if ax not in all_axes:
+                    all_axes.append(ax)
         else:
             all_axes = list(range(x.ndim))
-        if axis is None:
+
+        if axis is None or axis == list(range(x.type.ndim)):
             axis = NoneConst.clone()
         else:
-            axis = _as_tensor_variable(axis)
-            assert axis.ndim == 0
+            axis = _as_tensor_variable(all_axes)
+            assert axis.ndim == 1
         inputs = [x, axis]
+
         # We keep the original broadcastable flags for dimensions on which
         # we do not perform the max / argmax.
         broadcastable = [b for i, b in enumerate(x.type.broadcastable)
@@ -1350,25 +1349,41 @@ class MaxAndArgmax(Op):
         return Apply(self, inputs, outputs)
 
     def perform(self, node, inp, outs):
-        x, axis = inp
+        x, axes = inp
         max, max_idx = outs
-        max[0] = theano._asarray(numpy.max(x, axis),
+        if axes is None:
+            axes = tuple(range(x.ndim))
+        else:
+            axes = tuple(axes)
+        max[0] = theano._asarray(numpy.max(x, axes),
                                  dtype=node.outputs[0].dtype)
-        max_idx[0] = theano._asarray(numpy.argmax(x, axis), dtype='int64')
+        # Numpy does not support multiple axes for argmax
+        # Work around
+        keep_axes = numpy.array([i for i in range(x.ndim) if i not in axes])
+        # Not-reduced axes in front
+        transposed_x = numpy.transpose(x, numpy.concatenate((keep_axes, axes)))
+        reshaped_x = transposed_x.reshape(transposed_x.shape[:len(keep_axes)] +
+                                          (-1,))
+
+        max_idx[0] = theano._asarray(numpy.argmax(reshaped_x, axis=-1),
+                                     dtype='int64')
 
     def c_code(self, node, name, inp, out, sub):
         x, axis = inp
         max, argmax = out
         fail = sub["fail"]
-
         if NoneConst.equals(node.inputs[1]):
             axis_code = "axis = NPY_MAXDIMS;"
         else:
-            assert node.inputs[1].ndim == 0
+            assert node.inputs[1].ndim == 1
+            # Fall back to perform() if there are multiple axes
+            if len(node.inputs[1].data) > 1:
+                raise NotImplementedError()
             axis_code = """
             axis = ((dtype_%(axis)s*)PyArray_DATA(%(axis)s))[0];
             if(axis > PyArray_NDIM(%(x)s)-1 || axis < -PyArray_NDIM(%(x)s)){
-                PyErr_SetString(PyExc_ValueError, "MaxAndArgmax, bad axis argument");
+                PyErr_SetString(PyExc_ValueError,
+                "MaxAndArgmax, bad axis argument");
                 %(fail)s
             }
             """ % locals()
@@ -1420,10 +1435,10 @@ class MaxAndArgmax(Op):
     def infer_shape(self, node, shapes):
         ishape, axis_shape = shapes
         axis = node.inputs[1]
-        if node.inputs[1].data is None:
+        if axis.data is None:
             return [(), ()]
         rval = tuple([ishape[i] for (i, b) in enumerate(
-            node.inputs[0].type.broadcastable) if i != axis.data])
+            node.inputs[0].type.broadcastable) if i not in axis.data])
         return [rval, rval]
 
     def R_op(self, inputs, eval_points):
@@ -1492,7 +1507,7 @@ class MaxAndArgmax(Op):
             # We are taking the max/argmax over all dimensions.
             axis = None
         for i in xrange(x.ndim):
-            if axis is None or i == axis.data:
+            if axis is None or i in axis.data:
                 pattern.append('x')
             else:
                 pattern.append(out_dim)
@@ -1632,7 +1647,6 @@ def argmax(x, axis=None, keepdims=False):
     # In python (using MaxAndArgmax.perform()) this leads to a wasteful
     # implementation that goes through the data twice instead of once
     # but when Argmax.c_impl() is in place, it should be fine.
-
     argout = max_and_argmax(x, axis)[1]
 
     if keepdims:
@@ -2640,20 +2654,26 @@ class Alloc(gof.Op):
         sh = [as_tensor_variable(s) for s in shape]
         bcast = []
         for i, s in enumerate(sh):
+            if config.exception_verbosity == 'high':
+                s_as_str = '\n' + min_informative_str(s)
+            else:
+                s_as_str = str(s)
             if s.type.dtype[:3] not in ('int', 'uin'):
-                if config.exception_verbosity == 'high':
-                    s_as_str = '\n' + min_informative_str(s)
-                else:
-                    s_as_str = str(s)
                 raise TypeError('Shape arguments to Alloc must be integers, '
                                 'but argument %s is not for apply node: %s' %
                                 (i, s_as_str))
+            if s.ndim != 0:
+                raise TypeError(
+                    "Each shape dimension to Alloc must be a scalar, ",
+                    'but dimension %s have %d dimensions for apply node: %s' %
+                    (i, s.ndim, s_as_str))
+
             # if s is constant 1, then we're broadcastable in that dim
             try:
                 const_shp = get_scalar_constant_value(s)
             except NotScalarConstantError:
                 const_shp = None
-            bcast.append(numpy.all(1 == const_shp))
+            bcast.append(1 == const_shp)
         return sh, bcast
 
     def make_node(self, value, *shape):
@@ -2972,7 +2992,7 @@ def mean(input, axis=None, dtype=None, op=False, keepdims=False,
     For gpu, if you specify dtype=float32, everything will be done on the gpu.
 
     """
-
+    input = as_tensor_variable(input)
     if op:
         if dtype not in (None, 'float64'):
             raise NotImplementedError(
@@ -4024,9 +4044,10 @@ def shape_padaxis(t, axis):
 
 @constructor
 def stack(*tensors, **kwargs):
-    """Insert the arguments as slices into a tensor of 1 rank greater.
+    """Stack tensors in sequence on given axis (default is 0).
 
-    The size in dimension `axis` of the result will be equal to the number
+    Take a sequence of tensors and stack them on given axis to make a single
+    tensor. The size in dimension `axis` of the result will be equal to the number
     of tensors passed.
 
     Note: The interface stack(*tensors) is deprecated, you should use
@@ -4039,6 +4060,35 @@ def stack(*tensors, **kwargs):
     axis : int
         The index of the new axis. Default value is 0.
 
+    Examples
+    --------
+    >>> a = theano.tensor.scalar()
+    >>> b = theano.tensor.scalar()
+    >>> c = theano.tensor.scalar()
+    >>> x = theano.tensor.stack([a, b, c])
+    >>> x.ndim # x is a vector of length 3.
+    1
+    >>> a = theano.tensor.tensor4()
+    >>> b = theano.tensor.tensor4()
+    >>> c = theano.tensor.tensor4()
+    >>> x = theano.tensor.stack([a, b, c])
+    >>> x.ndim # x is a 5d tensor.
+    5
+    >>> rval = x.eval(dict((t, np.zeros((2, 2, 2, 2))) for t in [a, b, c]))
+    >>> rval.shape # 3 tensors are stacked on axis 0
+    (3, 2, 2, 2, 2)
+    >>> x = theano.tensor.stack([a, b, c], axis=3)
+    >>> x.ndim
+    5
+    >>> rval = x.eval(dict((t, np.zeros((2, 2, 2, 2))) for t in [a, b, c]))
+    >>> rval.shape # 3 tensors are stacked on axis 3
+    (2, 2, 2, 3, 2)
+    >>> x = theano.tensor.stack([a, b, c], axis=-2)
+    >>> x.ndim
+    5
+    >>> rval = x.eval(dict((t, np.zeros((2, 2, 2, 2))) for t in [a, b, c]))
+    >>> rval.shape # 3 tensors are stacked on axis -2
+    (2, 2, 2, 3, 2)
     """
     # ---> Remove this when moving to the new interface:
     if not tensors and not kwargs:
@@ -4794,6 +4844,12 @@ def arange(start, stop=None, step=1, dtype=None):
     # If dtype is not provided, infer it from the other arguments
     if dtype is None:
         dtype = scal.upcast(start.type.dtype, stop.type.dtype, step.type.dtype)
+        # don't try to be stingy and byte-optimize, this leads to
+        # overflow problems.
+        if dtype.startswith('int'):
+            dtype = 'int64'
+        if dtype.startswith('uint'):
+            dtype = 'uint64'
         if config.cast_policy in ('numpy', 'numpy+floatX'):
             # We enforce numpy semantics, except in the special case where
             # `config.cast_policy` is 'numpy+floatX' and we want to use float32
@@ -5981,7 +6037,7 @@ class AllocEmpty(gof.Op):
                 const_shp = get_scalar_constant_value(s)
             except NotScalarConstantError:
                 const_shp = None
-            bcast.append(numpy.all(1 == const_shp))
+            bcast.append(1 == const_shp)
         otype = TensorType(dtype=self.dtype, broadcastable=bcast)
         output = otype()
         return sh, output
@@ -6043,3 +6099,12 @@ class AllocEmpty(gof.Op):
 
     def do_constant_folding(self, node):
         return False
+
+    def connection_pattern(self, node):
+        return [[False] for i in node.inputs]
+
+    def grad(self, inputs, grads):
+        return [DisconnectedType()() for i in inputs]
+
+    def R_op(self, inputs, eval_points):
+        return [zeros(inputs, self.dtype)]

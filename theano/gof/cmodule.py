@@ -17,6 +17,7 @@ import tempfile
 import time
 import platform
 import distutils.sysconfig
+import warnings
 
 import numpy.distutils  # TODO: TensorType should handle this
 
@@ -253,7 +254,10 @@ static struct PyModuleDef moduledef = {{
         self.print_init(sio)
 
         rval = sio.getvalue()
-        self.code_hash = hash_from_code(rval)
+        # Make sure the hash of the code hasn't changed
+        h = hash_from_code(rval)
+        assert self.code_hash is None or self.code_hash == h
+        self.code_hash = h
         rval = re.sub(self.hash_placeholder, self.code_hash, rval)
         # Finalize the Module, so no support code or function
         # can be added
@@ -321,7 +325,10 @@ def dlimport(fullpath, suffix=None):
             if hasattr(importlib, "invalidate_caches"):
                 importlib.invalidate_caches()
         t0 = time.time()
-        rval = __import__(module_name, {}, {}, [module_name])
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore",
+                                    message="numpy.ndarray size changed")
+            rval = __import__(module_name, {}, {}, [module_name])
         t1 = time.time()
         import_time += t1 - t0
         if not rval:
@@ -1766,6 +1773,8 @@ class Compiler(object):
 class GCC_compiler(Compiler):
     # The equivalent flags of --march=native used by g++.
     march_flags = None
+
+    supports_amdlibm = True
 
     @staticmethod
     def version_str():

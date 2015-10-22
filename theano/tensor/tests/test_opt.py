@@ -481,7 +481,7 @@ class test_canonize(unittest.TestCase):
         mode = compile.mode.get_default_mode()
 
         opt = gof.Query(["canonicalize"])
-        opt = opt.including('ShapeOpt')
+        opt = opt.including('ShapeOpt', 'local_fill_to_alloc')
         opt = opt.excluding(
             'local_elemwise_fusion')
         mode = mode.__class__(linker=mode.linker, optimizer=opt)
@@ -4021,7 +4021,8 @@ class T_Rebroadcast(unittest.TestCase):
 
 class T_useless_elemwise(unittest.TestCase):
     def setUp(self):
-        self.mode = theano.compile.get_default_mode().including('canonicalize')
+        self.mode = theano.compile.get_default_mode().including(
+            'canonicalize', 'local_fill_to_alloc')
 
     def test_eq(self):
         x = T.dmatrix()
@@ -4228,7 +4229,9 @@ def test_constant_get_stabilized():
     """
     x2 = T.scalar()
     y2 = T.log(1 + T.exp(x2))
-    f2 = theano.function([x2], y2)
+    mode = theano.compile.get_default_mode()
+    mode.check_isfinite = False
+    f2 = theano.function([x2], y2, mode=mode)
     try:
         assert len(f2.maker.fgraph.toposort()) == 1
         assert f2.maker.fgraph.toposort()[0].op == \
@@ -4237,14 +4240,14 @@ def test_constant_get_stabilized():
 
         x = T.as_tensor_variable(800)
         y = T.log(1 + T.exp(x))
-        f = theano.function([], y)
+        f = theano.function([], y, mode=mode)
         assert len(f.maker.fgraph.toposort()) == 0
         assert numpy.isinf(f())
 
         # When this error is fixed, the following line should be ok.
         assert f() == 800, f()
 
-    except (AssertionError, theano.compile.debugmode.InvalidValueError):
+    except AssertionError:
         raise SkipTest('Theano optimizes constant before stabilization. '
                        'This breaks stabilization optimization in some '
                        'cases. See #504.')
@@ -4545,7 +4548,7 @@ class T_local_erfc(unittest.TestCase):
 
         # test that we work without the mul
         f = theano.function([x], T.exp(T.neg(T.sqr(x))) / T.erfc(x), mode=mode)
-        assert len(f.maker.fgraph.apply_nodes) == 23, len(f.maker.fgraph.apply_nodes)
+        assert len(f.maker.fgraph.apply_nodes) == 22, len(f.maker.fgraph.apply_nodes)
         assert f.maker.fgraph.outputs[0].dtype == theano.config.floatX
         assert all(numpy.isfinite(f(val)))
 
@@ -4558,7 +4561,7 @@ class T_local_erfc(unittest.TestCase):
 
         # test that we work without the sqr and neg
         f = theano.function([x], T.exp(T.mul(-1, x, x)) / T.erfc(x), mode=mode)
-        assert len(f.maker.fgraph.apply_nodes) == 22, len(f.maker.fgraph.apply_nodes)
+        assert len(f.maker.fgraph.apply_nodes) == 21, len(f.maker.fgraph.apply_nodes)
         assert f.maker.fgraph.outputs[0].dtype == theano.config.floatX
         assert all(numpy.isfinite(f(val)))
 
@@ -4891,6 +4894,17 @@ class T_local_sum_prod(unittest.TestCase):
                 dd = sorted(dd)
                 return data.sum(d).sum(dd[1]).sum(dd[0])
 
+        def my_sum_prod(data, d, dd):
+            # This sum when d or dd is a tuple of 2 dimensions.
+            if not isinstance(d, tuple) and not isinstance(dd, tuple):
+                return data.sum(d).prod(dd)
+            if isinstance(d, tuple):
+                d = sorted(d)
+                return data.sum(d[1]).sum(d[0]).prod(dd)
+            else:
+                dd = sorted(dd)
+                return data.sum(d).prod(dd[1]).prod(dd[0])
+
         try:
             for d, dd in dims:
                 expected = my_sum(input, d, dd)
@@ -4929,6 +4943,25 @@ class T_local_sum_prod(unittest.TestCase):
             assert len(f.maker.fgraph.apply_nodes) == 1
         f = theano.function([a], a.prod(None).prod(), mode=self.mode)
         assert numpy.allclose(f(input), input.prod())
+        assert len(f.maker.fgraph.apply_nodes) == 1
+
+        # test sum prod don't get opt.
+        for d, dd in dims:
+            expected = my_sum_prod(input, d, dd)
+            f = theano.function([a], a.sum(d).prod(dd), mode=self.mode)
+            assert numpy.allclose(f(input), expected)
+            assert len(f.maker.fgraph.apply_nodes) == 2
+        for d, dd in dims[:6]:
+            f = theano.function([a], a.sum(d).prod(dd).
+                                prod(0), mode=self.mode)
+            assert numpy.allclose(f(input), input.sum(d).prod(dd).prod(0))
+            assert len(f.maker.fgraph.apply_nodes) == 2
+        for d in [0, 1, 2]:
+            f = theano.function([a], a.sum(d).prod(None), mode=self.mode)
+            assert numpy.allclose(f(input), input.sum(d).prod())
+            assert len(f.maker.fgraph.apply_nodes) == 2
+        f = theano.function([a], a.sum(None).prod(), mode=self.mode)
+        assert numpy.allclose(f(input), input.sum())
         assert len(f.maker.fgraph.apply_nodes) == 1
 
 

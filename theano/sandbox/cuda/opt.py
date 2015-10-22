@@ -104,7 +104,7 @@ optdb.register('gpu_after_fusion',
                'gpu')
 
 # Register merge_optimizer as a global opt
-gpu_optimizer.register('gpu_merge', theano.gof.opt.merge_optimizer,
+gpu_optimizer.register('gpu_merge', theano.gof.opt.MergeOptimizer(),
                        'fast_run', 'fast_compile', final_opt=True)
 
 
@@ -2233,11 +2233,14 @@ def local_gpu_eye(node):
         if (host_input.owner and
             isinstance(host_input.owner.op, tensor.Eye) and
             host_input.owner.op.dtype == "float32"):
-
+            if tensor.extract_constant(host_input.owner.inputs[2]) != 0:
+                return
             return [gpu_eye(*host_input.owner.inputs)]
     if isinstance(node.op, tensor.Eye) and node.op.dtype == "float32":
         if any([(i.owner and isinstance(i.owner.op, HostFromGpu))
                 for i in node.inputs]):
+            if tensor.extract_constant(node.inputs[2]) != 0:
+                return
             return [host_from_gpu(gpu_eye(*node.inputs))]
     return False
 
@@ -2478,8 +2481,11 @@ def local_gpu_allocempty(node):
     return False
 
 
+def typeInfer(node):
+    return typeConstructor
+
 optdb.register('gpu_scanOp_make_inplace',
-               scan_opt.ScanInplaceOptimizer(typeConstructor=typeConstructor,
+               scan_opt.ScanInplaceOptimizer(typeInfer=typeInfer,
                                              gpu_flag=True),
                75,
                'gpu',

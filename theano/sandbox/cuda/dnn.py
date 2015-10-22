@@ -10,7 +10,6 @@ from theano.gof import Optimizer, local_optimizer, COp
 from theano.gof.type import CDataType, Generic
 from theano.compile import optdb
 from theano.compile.ops import shape_i
-from theano.configparser import AddConfigVar, EnumStr
 from theano.tensor.nnet import SoftmaxGrad
 from theano.tensor.signal.downsample import (
     DownsampleFactorMax, MaxPoolGrad, AveragePoolGrad)
@@ -56,15 +55,17 @@ if ((err = cudnnCreate(&_handle)) != CUDNN_STATUS_SUCCESS) {
   return 1;
 }
 """
+            params = ["-l", "cudnn", "-I" + os.path.dirname(__file__)]
+            if config.dnn.include_path:
+                params.append("-I" + config.dnn.include_path)
+            if config.dnn.library_path:
+                params.append("-L" + config.dnn.library_path)
             # Do not run here the test program. It would run on the
             # default gpu, not the one selected by the user. If mixed
             # GPU are installed or if the GPUs are configured in
             # exclusive mode, this cause bad detection.
             comp, out, err = NVCC_compiler.try_flags(
-                ["-l", "cudnn", "-I" + os.path.dirname(__file__),
-                 "-I" + os.path.join(theano.config.cuda.root, 'include'),
-                 "-L" + os.path.join(theano.config.cuda.root, 'lib64')],
-                preambule=preambule, body=body,
+                flag_list=params, preambule=preambule, body=body,
                 try_run=False, output=True)
 
             dnn_available.avail = comp
@@ -141,7 +142,6 @@ if (%(err)s != CUDNN_STATUS_SUCCESS) {
     %(fail)s
 }
 }
-
         """ % dict(var=var, err=err, desc=desc, fail=fail)
 
 
@@ -359,37 +359,9 @@ class GpuDnnConvDesc(GpuOp):
     def c_code_cache_version(self):
         return (2, version())
 
-
-AddConfigVar('dnn.conv.workmem',
-             "This flag is deprecated; use dnn.conv.algo_fwd.",
-             EnumStr(''),
-             in_c_key=False)
-
-AddConfigVar('dnn.conv.workmem_bwd',
-             "This flag is deprecated; use dnn.conv.algo_bwd.",
-             EnumStr(''),
-             in_c_key=False)
-
-AddConfigVar('dnn.conv.algo_fwd',
-             "Default implementation to use for CuDNN forward convolution.",
-             EnumStr('small', 'none', 'large', 'fft', 'guess_once',
-                     'guess_on_shape_change', 'time_once',
-                     'time_on_shape_change'),
-             in_c_key=False)
-
-AddConfigVar('dnn.conv.algo_bwd',
-             "Default implementation to use for CuDNN backward convolution.",
-             EnumStr('none', 'deterministic', 'fft', 'guess_once',
-                     'guess_on_shape_change', 'time_once',
-                     'time_on_shape_change'),
-             in_c_key=False)
-
-
 # scalar constants
 _zero = constant(numpy.asarray(0.0, dtype='float32'))
 _one = constant(numpy.asarray(1.0, dtype='float32'))
-_ifour = constant(numpy.asarray(4, dtype='int32'))
-_ifive = constant(numpy.asarray(5, dtype='int32'))
 
 
 def ensure_float(val, default, name):
@@ -403,20 +375,6 @@ def ensure_float(val, default, name):
         raise TypeError("%s: expected a scalar value" % (name,))
     if not val.type.dtype == 'float32':
         raise TypeError("%s: type is not float32" % (name,))
-    return val
-
-
-def ensure_int(val, default, name):
-    if val is None:
-        return default.clone()
-    if not isinstance(val, Variable):
-        val = constant(val)
-    if hasattr(val, 'ndim') and val.ndim == 0:
-        val = as_scalar(val)
-    if not isinstance(val.type, theano.scalar.Scalar):
-        raise TypeError("%s: expected a scalar value" % (name,))
-    if not val.type.dtype == 'int32':
-        raise TypeError("%s: type is not int32" % (name,))
     return val
 
 
@@ -1147,8 +1105,11 @@ def dnn_conv(img, kerns, border_mode='valid', subsample=(1, 1),
     kerns
         Convolution filters.
     border_mode
-        One of 'valid', 'full'; additionally, the padding size could be directly
-        specified by an integer or a pair of integers.
+        One of 'valid', 'full'; additionally, the padding size can be
+        directly specified by an integer or a pair of integers (as a tuple),
+        specifying the amount of zero padding added to _both_ the top and
+        bottom (first entry) and left and right (second entry) sides of
+        the image.
     subsample
         Perform subsampling of the output (default: (1, 1)).
     conv_mode
@@ -1243,8 +1204,11 @@ def dnn_conv3d(img, kerns, border_mode='valid', subsample=(1, 1, 1),
 
     :param img: images to do the convolution over
     :param kerns: convolution filters
-    :param border_mode: one of 'valid', 'full'; additionally, the padding size
-        could be directly specified by an integer or a pair of integers
+    :param border_mode: One of 'valid', 'full'; additionally, the padding
+    	size can be directly specified by an integer or a pair of integers
+    	(as a tuple), specifying the amount of zero padding added to _both_
+    	the top and bottom (first entry) and left and right (second entry)
+    	sides of the image.
     :param subsample: perform subsampling of the output (default: (1, 1, 1))
     :param conv_mode: perform convolution (kernels flipped) or
         cross-correlation. One of 'conv', 'cross'. (default: 'conv')
@@ -1325,9 +1289,11 @@ class GpuDnnPoolDesc(GpuOp):
     mode : {'max', 'average_inc_pad', 'average_exc_pad'}
         The old deprecated name 'average' correspond to 'average_inc_pad'.
     pad
-        (padX, padY) padding information.
-        padX is the size of the left and right borders,
-        padY is the size of the top and bottom borders.
+        (pad_h, pad_w) padding information.
+        pad_h is the number of zero-valued pixels added to each of the top and
+        bottom borders.
+        pad_w is the number of zero-valued pixels added to each of the left and
+        right borders.
 
     """
 
@@ -1448,15 +1414,18 @@ class GpuDnnPool(DnnBase):
                 or desc.type.ctype != 'cudnnPoolingDescriptor_t':
             raise TypeError('desc must be cudnnPoolingDescriptor_t')
 
-        dop = desc.owner.op
-        e_ndim = dop.get_ndim() + 2  # 4 or 5
+        if desc.owner is not None:
+            dop = desc.owner.op
+            e_ndim = dop.get_ndim() + 2  # 4 or 5
 
-        if img.type.ndim != e_ndim:
-            raise TypeError('img must be %dD tensor' % e_ndim)
+            if img.type.ndim != e_ndim:
+                raise TypeError('img must be %dD tensor' % e_ndim)
 
         return Apply(self, [img, desc], [img.type()])
 
     def infer_shape(self, node, shape):
+        if not node.inputs[1].owner:
+            raise theano.tensor.ShapeError()
         desc = node.inputs[1].owner.op
         nd = desc.get_ndim()
         w = desc.ws
@@ -1614,19 +1583,21 @@ class GpuDnnPoolGrad(DnnBase):
                 or desc.type.ctype != 'cudnnPoolingDescriptor_t':
             raise TypeError('desc must be cudnnPoolingDescriptor_t')
 
-        nd = desc.owner.op.get_ndim() + 2  # 4 or 5
-
         inp = as_cuda_ndarray_variable(inp)
-        if inp.type.ndim != nd:
-            raise TypeError('inp must be %dD tensor' % (nd,))
-
         inp_grad = as_cuda_ndarray_variable(inp_grad)
-        if inp_grad.type.ndim != nd:
-            raise TypeError('inp_grad must be %dD tensor' % (nd,))
-
         out = as_cuda_ndarray_variable(out)
-        if out.type.ndim != nd:
-            raise TypeError('out must be %dD tensor' % (nd,))
+
+        if desc.owner is not None:
+            nd = desc.owner.op.get_ndim() + 2  # 4 or 5
+
+            if inp.type.ndim != nd:
+                raise TypeError('inp must be %dD tensor' % (nd,))
+
+            if inp_grad.type.ndim != nd:
+                raise TypeError('inp_grad must be %dD tensor' % (nd,))
+
+            if out.type.ndim != nd:
+                raise TypeError('out must be %dD tensor' % (nd,))
 
         return Apply(self, [inp, out, inp_grad, desc],
                      [inp.type()])
@@ -1789,12 +1760,11 @@ def dnn_pool(img, ws, stride=(1, 1), mode='max', pad=(0, 0)):
         Subsampling stride (default: (1, 1)).
     mode : {'max', 'average_inc_pad', 'average_exc_pad}
     pad
-        (padX, padY) padding information.
-        padX is the size of the left and right borders,
-        padY is the size of the top and bottom borders.
-    :param nd: dimensions of pooling, can be 2 or 3 for 2d or 3d pooling
-        If set to 3 all other params (except mode) must have an extra
-        dimension to match. 3 is only available for cudnn v3
+        (pad_h, pad_w) padding information.
+        pad_h is the number of zero-valued pixels added to each of the top and
+        bottom borders.
+        pad_w is the number of zero-valued pixels added to each of the left
+        and right borders.
 
     .. warning:: The cuDNN library only works with GPU that have a compute
       capability of 3.0 or higer.  This means that older GPU will not
@@ -1817,7 +1787,7 @@ class GpuDnnSoftmaxBase(DnnBase):
     Parameters
     ----------
     tensor_format
-        Whether the data format is 'bc01' or 'b01c'.
+        Always set this to 'bc01'.
     algo
         'fast', 'accurate' or 'log' indicating whether, respectively, computations
 	should be optimized for speed, for accuracy, or if CuDNN should rather
@@ -1832,7 +1802,13 @@ class GpuDnnSoftmaxBase(DnnBase):
     __props__ = ('tensor_format', 'mode', 'algo')
 
     def __init__(self, tensor_format, algo, mode):
-        assert(tensor_format in ('bc01', 'b01c'))
+        if tensor_format != 'bc01':
+            raise ValueError(
+                "It was discovered that since December 2014, the "
+                "tensor_format parameter was ignored and the equivalent of "
+                "'bc01' is always used.  Since your code seems to be using "
+                "another value, this might have affected previous results "
+                "ran with this code.")
         DnnBase.__init__(self)
         self.tensor_format = tensor_format
 
@@ -1974,7 +1950,7 @@ class GpuDnnSoftmax(GpuDnnSoftmaxBase):
     Parameters
     ----------
     tensor_format
-        Whether the data format is 'bc01' or 'b01c'.
+        Always set to 'bc01'.
     algo
         'fast' or 'accurate' indicating whether computations should be
         optimized for speed or accuracy respectively.
@@ -2042,7 +2018,7 @@ class GpuDnnSoftmaxGrad(GpuDnnSoftmaxBase):
     Parameters
     ----------
     tensor_format
-        Whether the data format is 'bc01' or 'b01c'.
+        Always set to 'bc01'.
     algo
         'fast' or 'accurate' indicating whether computations should be
         optimized for speed or accuracy respectively.

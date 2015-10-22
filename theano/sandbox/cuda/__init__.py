@@ -316,7 +316,7 @@ if cuda_available:
             GpuDimShuffle, GpuCAReduce, GpuReshape, GpuContiguous,
             GpuSubtensor, GpuIncSubtensor,
             GpuAdvancedSubtensor1, GpuAdvancedIncSubtensor1,
-            GpuFlatten, GpuShape, GpuAlloc, GpuSplit,
+            GpuFlatten, GpuShape, GpuAlloc, GpuAllocEmpty, GpuSplit,
             GpuJoin, fscalar, fvector, fmatrix, frow, fcol,
             ftensor3, ftensor4,
             scalar, vector, matrix, row, col,
@@ -341,7 +341,7 @@ def use(device,
 
     Parameters
     ----------
-    device : string 
+    device : string
         "cpu", "gpu", "gpuN" (N is the device number to use).
     force
         Will always raise an exception if we can't use the gpu.
@@ -535,7 +535,7 @@ def handle_shared_float32(tf):
 # import dependency. So we also test it in the file theano/__init__.py
 if config.device.startswith('gpu'):
     use(device=config.device, force=config.force_device, test_driver=False)
-elif config.init_gpu_device:
+elif config.init_gpu_device.startswith('gpu'):
     assert config.device == "cpu", (
         "We can use the Theano flag init_gpu_device"
         " only when the Theano flag device=='cpu'")

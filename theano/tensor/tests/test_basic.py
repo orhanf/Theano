@@ -2026,6 +2026,7 @@ AllocTester = makeBroadcastTester(
                     bad_shape12=(rand(7), numpy.int32(7), numpy.int32(5)),
                     ),
         bad_build=dict(
+                    vec=(rand(1), [numpy.int32(2)]),
                     too_big32=(rand(6, 2, 4), numpy.
                         int32(6), numpy.int32(2)),
                     too_big32b=(rand(6, 2, 4), numpy.
@@ -2641,7 +2642,7 @@ def _approx_eq(a, b, eps=1.0e-4):
         if _approx_eq.debug:
             print(a, b)
         return False
-    return  True
+    return True
 _approx_eq.debug = 0
 
 
@@ -2799,10 +2800,10 @@ class T_max_and_argmax(unittest.TestCase):
     def test2(self):
         data = rand(2, 3)
         n = as_tensor_variable(data)
-        for (axis, np_axis)  in [(-1, -1), (0, 0), (1, 1), (None, None),
-                                 ([0, 1], None), ([1, 0], None),
-                                 (NoneConst.clone(), None),
-                                 (constant(0), 0)]:
+        for (axis, np_axis) in [(-1, -1), (0, 0), (1, 1), (None, None),
+                                ([0, 1], None), ([1, 0], None),
+                                (NoneConst.clone(), None),
+                                (constant(0), 0)]:
             v, i = eval_outputs(max_and_argmax(n, axis))
             assert i.dtype == 'int64'
             self.assertTrue(numpy.all(v == numpy.max(data, np_axis)))
@@ -2860,8 +2861,8 @@ class T_max_and_argmax(unittest.TestCase):
     def test3(self):
         data = rand(2, 3, 4)
         n = as_tensor_variable(data)
-        for (axis, np_axis)  in [(-1, -1), (0, 0), (1, 1), (None, None),
-                                 ([0, 1, 2], None), ([1, 2, 0], None)]:
+        for (axis, np_axis) in [(-1, -1), (0, 0), (1, 1), (None, None),
+                                ([0, 1, 2], None), ([1, 2, 0], None)]:
             v, i = eval_outputs(max_and_argmax(n, axis))
             assert i.dtype == 'int64'
             self.assertTrue(numpy.all(v == numpy.max(data, np_axis)))
@@ -2922,8 +2923,8 @@ class T_max_and_argmax(unittest.TestCase):
                 z[argmax] += 1
             else:
                 for id, v in enumerate(argmax):
-                    z[v * numpy.prod(data.shape[data.ndim - 1:axis:-1])
-                      + id] += 1
+                    z[v * numpy.prod(data.shape[data.ndim - 1:axis:-1]) +
+                      id] += 1
 
             z = z.reshape(data.shape)
             assert numpy.all(max_grad_data == z)
@@ -2931,11 +2932,11 @@ class T_max_and_argmax(unittest.TestCase):
         for axis in (-1, 0, 1, None):
             for j in xrange(2):
                 safe_verify_grad(lambda v: max_and_argmax(v, axis=axis)[j],
-                                [data])
+                                 [data])
                 if axis != 1:
                     safe_verify_grad(lambda v: max_and_argmax(v.flatten(),
-                                                             axis=axis)[j],
-                                    [data])
+                                                              axis=axis)[j],
+                                     [data])
             if axis in (0, None):
                 check_grad_max(data, eval_outputs(grad(
                     max_and_argmax(n, axis=axis)[0].sum(), n)), axis=axis)
@@ -2956,6 +2957,11 @@ class T_max_and_argmax(unittest.TestCase):
             safe_verify_grad(lambda v: max_and_argmax(v, axis=[i])[0], [data])
             safe_verify_grad(lambda v: max_and_argmax(v, axis=[i])[1], [data])
 
+        # Test grad with multiple axes
+        for i in [[0, 1], [0, 0]]:
+            safe_verify_grad(lambda v: max_and_argmax(v, axis=i)[0], [data])
+            safe_verify_grad(lambda v: max_and_argmax(v, axis=i)[1], [data])
+
     def test_preserve_broadcastable(self):
         """
         Ensure the original broadcastable flags are preserved by Max/Argmax.
@@ -2963,6 +2969,16 @@ class T_max_and_argmax(unittest.TestCase):
         x = tensor.matrix().dimshuffle('x', 0, 'x', 1, 'x')
         y = x.max(axis=1)
         assert y.type.broadcastable == (True, True, False, True)
+
+    def test_multiple_axes(self):
+        data = numpy.arange(24).reshape(3, 2, 4)
+        x = as_tensor_variable(data)
+        v, i = eval_outputs(max_and_argmax(x, [1, -1]))
+        assert numpy.all(v == numpy.array([7, 15, 23]))
+        assert numpy.all(i == numpy.array([7, 7, 7]))
+
+        v = eval_outputs(max_and_argmax(x, [1, -1])[0].shape)
+        assert tuple(v) == numpy.max(data, (1, -1)).shape
 
 
 class T_argmin_argmax(unittest.TestCase):
@@ -3286,6 +3302,11 @@ class T_min_max(unittest.TestCase):
             utt.verify_grad(lambda v: fct(v, axis=[0, 1]), [data])
         # check_grad_max(data, eval_outputs(grad(max_and_argmax(n,
         # axis=1)[0], n)),axis=1)
+
+
+def test_basic_allclose():
+    # This was raised by a user in https://github.com/Theano/Theano/issues/2975
+    assert tensor.basic._allclose(-0.311023883434, -0.311022856884)
 
 
 class T_outer(unittest.TestCase):
@@ -4443,6 +4464,10 @@ class T_mean(unittest.TestCase):
         data = rand(50)
         assert numpy.allclose(f(data), numpy.mean(data))
 
+    def test_list(self):
+        ll = [theano.shared(0.), theano.shared(2.)]
+        tensor.mean(ll).eval() == 1
+
 
 class test_matinv(unittest.TestCase):
 
@@ -5316,7 +5341,7 @@ class TestARange(unittest.TestCase):
         f = function([start, stop, step], out)
 
         if config.cast_policy == 'custom':
-            assert out.dtype == start.type.dtype
+            assert out.dtype == 'int64'
         elif config.cast_policy in ('numpy', 'numpy+floatX'):
             numpy_dtype = numpy.arange(numpy.array(1, dtype='int32')).dtype
             assert out.dtype == numpy_dtype
@@ -5393,7 +5418,7 @@ class TestARange(unittest.TestCase):
         f = function([start, stop], out)
 
         if config.cast_policy == 'custom':
-            assert out.dtype == start.type.dtype
+            assert out.dtype == 'int64'
         elif config.cast_policy in ('numpy', 'numpy+floatX'):
             assert out.dtype == numpy.arange(numpy.int32(0),
                                              numpy.int32(1)).dtype
@@ -5421,7 +5446,7 @@ class TestARange(unittest.TestCase):
         f = function([stop], out)
 
         if config.cast_policy == 'custom':
-            assert out.dtype == stop.type.dtype
+            assert out.dtype == 'int64'
         elif config.cast_policy in ('numpy', 'numpy+floatX'):
             assert out.dtype == numpy.arange(numpy.int32(1)).dtype
         else:
@@ -5453,7 +5478,7 @@ class TestARange(unittest.TestCase):
     def test_upcast(self):
         """Test that arange computes output type adequately"""
         if config.cast_policy == 'custom':
-            assert arange(iscalar()).dtype == iscalar().dtype
+            assert arange(iscalar()).dtype == 'int64'
             assert arange(fscalar()).dtype == fscalar().dtype
             assert arange(dscalar()).dtype == dscalar().dtype
 
@@ -5547,7 +5572,7 @@ class TestARange(unittest.TestCase):
         assert len(f.maker.fgraph.toposort()) == 9
 
         if config.cast_policy == 'custom':
-            assert out.dtype == start.type.dtype
+            assert out.dtype == 'int64'
         elif config.cast_policy in ('numpy', 'numpy+floatX'):
             numpy_dtype = numpy.arange(numpy.array(0, dtype=start.dtype),
                                        numpy.array(1, dtype=stop.dtype),
@@ -5568,7 +5593,7 @@ class TestARange(unittest.TestCase):
         assert len(f.maker.fgraph.toposort()) == 5
 # 4 [Elemwise{sub,no_inplace}(stop, start), Elemwise{Cast{int64}}(Elemwise{sub,no_inplace}.0), Elemwise{Maximum{output_types_preference=transfer_type{0}}}[(0, 0)](Elemwise{Cast{int64}}.0, 0), MakeVector(Elemwise{Maximum{output_types_preference=transfer_type{0}}}[(0, 0)].0)]
         if config.cast_policy == 'custom':
-            assert out.dtype == start.type.dtype
+            assert out.dtype == 'int64'
         elif config.cast_policy in ('numpy', 'numpy+floatX'):
             assert out.dtype == numpy.arange(
                     numpy.int32(0), numpy.int32(1), numpy.int32(1)).dtype
@@ -5590,7 +5615,7 @@ class TestARange(unittest.TestCase):
         #[Elemwise{Cast{int64}}(stop), MakeVector(Elemwise{Cast{int64}}.0)]
 
         if config.cast_policy == 'custom':
-            assert out.dtype == start.type.dtype
+            assert out.dtype == 'int64'
         elif config.cast_policy in ('numpy', 'numpy+floatX'):
             numpy_dtype = numpy.arange(0,
                                        numpy.array(1, dtype=stop.dtype),
@@ -6069,11 +6094,16 @@ def test_var():
     assert numpy.allclose(numpy.var(a_val, axis=2), f(a_val))
 
 
-def test_sum_overflow():
-    """Ensure that overflow errors are a little bit harder to get"""
-    a = Tensor(dtype='int8', broadcastable=[False])()
-    f = function([a], sum(a))
-    assert f([1] * 300) == 300
+class T_sum(unittest.TestCase):
+    def test_sum_overflow(self):
+        """Ensure that overflow errors are a little bit harder to get"""
+        a = Tensor(dtype='int8', broadcastable=[False])()
+        f = function([a], sum(a))
+        assert f([1] * 300) == 300
+
+    def test_list(self):
+        ll = [theano.shared(0.), theano.shared(2.)]
+        tensor.sum(ll).eval() == 2
 
 
 @dec.skipif(

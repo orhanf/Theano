@@ -121,7 +121,7 @@ as it will be useful later on.
     
      * Insert manual cast in your code or use *[u]int{8,16}*.
      * Insert manual cast around the mean operator (this involves division by length, which is an *int64*).
-     * Notice that a new casting mechanism is being developed.
+     * Note that a new casting mechanism is being developed.
 
 :download:`Solution<modes_solution_1.py>`
 
@@ -137,7 +137,7 @@ is controlled by the value of the ``mode`` parameter.
 
 Theano defines the following modes by name:
 
-- ``'FAST_COMPILE'``: Apply just a few graph optimizations and only use Python implementations.
+- ``'FAST_COMPILE'``: Apply just a few graph optimizations and only use Python implementations. So GPU is disabled.
 - ``'FAST_RUN'``: Apply all optimizations and use C implementations where possible.
 - ``'DebugMode``: Verify the correctness of all optimizations, and compare C and Python 
     implementations. This mode can take much longer than the other modes, but can identify
