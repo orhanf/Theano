@@ -3135,7 +3135,7 @@ def test_local_fill_useless():
     assert T.Alloc in ops
     f(m_, x_)
 
-    
+
 class Test_local_useless_elemwise_comparison(unittest.TestCase):
     def test_local_useless_elemwise_comparison(self):
         # TODO: test each case individually.
@@ -3150,57 +3150,57 @@ class Test_local_useless_elemwise_comparison(unittest.TestCase):
         theano.printing.debugprint(Z)
         # here is the output for the debug print:
         """
-        Elemwise{add,no_inplace} [@A] ''
-         |for{cpu,scan_fn} [@B] ''
-         | |Subtensor{int64} [@C] ''
-         | | |Shape [@D] ''
-         | | | |Subtensor{int64::} [@E] 'X[0:]'
-         | | |   |X [@F]
-         | | |   |Constant{0} [@G]
-         | | |Constant{0} [@H]
-         | |Subtensor{:int64:} [@I] ''
-         | | |Subtensor{int64::} [@E] 'X[0:]'
-         | | |ScalarFromTensor [@J] ''
-         | |   |Subtensor{int64} [@C] ''
-         | |Subtensor{int64} [@C] ''
-         |Y [@K]
+        Elemwise{add,no_inplace} [id A] ''
+         |for{cpu,scan_fn} [id B] ''
+         | |Subtensor{int64} [id C] ''
+         | | |Shape [id D] ''
+         | | | |Subtensor{int64::} [id E] 'X[0:]'
+         | | |   |X [id F]
+         | | |   |Constant{0} [id G]
+         | | |Constant{0} [id H]
+         | |Subtensor{:int64:} [id I] ''
+         | | |Subtensor{int64::} [id E] 'X[0:]'
+         | | |ScalarFromTensor [id J] ''
+         | |   |Subtensor{int64} [id C] ''
+         | |Subtensor{int64} [id C] ''
+         |Y [id K]
 
         Inner graphs of the scan ops:
 
-        for{cpu,scan_fn} [@B] ''
-         >Sum{acc_dtype=float64} [@L] ''
-         > |X[t] [@M] -> [@I]
+        for{cpu,scan_fn} [id B] ''
+         >Sum{acc_dtype=float64} [id L] ''
+         > |X[t] [id M] -> [id I]
         """
-        
+
         mode = theano.compile.get_default_mode().excluding('fusion')
         f = theano.function([X, Y], Z, mode=mode)
         theano.printing.debugprint(f, print_type=True)
         # here is the output for the debug print:
         """
-        Elemwise{Add}[(0, 0)] [@A] <TensorType(float64, vector)> ''   7
-         |for{cpu,scan_fn} [@B] <TensorType(float64, vector)> ''   6
-         | |Shape_i{0} [@C] <TensorType(int64, scalar)> ''   0
-         | | |X [@D] <TensorType(float64, matrix)>
-         | |Subtensor{int64:int64:int8} [@E] <TensorType(float64, matrix)> ''   5
-         | | |X [@D] <TensorType(float64, matrix)>
-         | | |ScalarFromTensor [@F] <int64> ''   4
-         | | | |Elemwise{switch,no_inplace} [@G] <TensorType(int64, scalar)> ''   3
-         | | |   |Elemwise{le,no_inplace} [@H] <TensorType(int8, scalar)> ''   2
-         | | |   | |Shape_i{0} [@C] <TensorType(int64, scalar)> ''   0
-         | | |   | |TensorConstant{0} [@I] <TensorType(int8, scalar)>
-         | | |   |TensorConstant{0} [@I] <TensorType(int8, scalar)>
-         | | |   |TensorConstant{0} [@J] <TensorType(int64, scalar)>
-         | | |ScalarFromTensor [@K] <int64> ''   1
-         | | | |Shape_i{0} [@C] <TensorType(int64, scalar)> ''   0
-         | | |Constant{1} [@L] <int8>
-         | |Shape_i{0} [@C] <TensorType(int64, scalar)> ''   0
-         |Y [@M] <TensorType(float64, vector)>
+        Elemwise{Add}[(0, 0)] [id A] <TensorType(float64, vector)> ''   7
+         |for{cpu,scan_fn} [id B] <TensorType(float64, vector)> ''   6
+         | |Shape_i{0} [id C] <TensorType(int64, scalar)> ''   0
+         | | |X [id D] <TensorType(float64, matrix)>
+         | |Subtensor{int64:int64:int8} [id E] <TensorType(float64, matrix)> ''   5
+         | | |X [id D] <TensorType(float64, matrix)>
+         | | |ScalarFromTensor [id F] <int64> ''   4
+         | | | |Elemwise{switch,no_inplace} [id G] <TensorType(int64, scalar)> ''   3
+         | | |   |Elemwise{le,no_inplace} [id H] <TensorType(int8, scalar)> ''   2
+         | | |   | |Shape_i{0} [id C] <TensorType(int64, scalar)> ''   0
+         | | |   | |TensorConstant{0} [id I] <TensorType(int8, scalar)>
+         | | |   |TensorConstant{0} [id I] <TensorType(int8, scalar)>
+         | | |   |TensorConstant{0} [id J] <TensorType(int64, scalar)>
+         | | |ScalarFromTensor [id K] <int64> ''   1
+         | | | |Shape_i{0} [id C] <TensorType(int64, scalar)> ''   0
+         | | |Constant{1} [id L] <int8>
+         | |Shape_i{0} [id C] <TensorType(int64, scalar)> ''   0
+         |Y [id M] <TensorType(float64, vector)>
 
         Inner graphs of the scan ops:
 
-        for{cpu,scan_fn} [@B] <TensorType(float64, vector)> ''
-         >Sum{acc_dtype=float64} [@N] <TensorType(float64, scalar)> ''
-         > |X[t] [@O] <TensorType(float64, vector)> -> [@E]
+        for{cpu,scan_fn} [id B] <TensorType(float64, vector)> ''
+         >Sum{acc_dtype=float64} [id N] <TensorType(float64, scalar)> ''
+         > |X[t] [id O] <TensorType(float64, vector)> -> [id E]
         """
 
     def assert_eqs_const(self, f, val):
@@ -3211,7 +3211,7 @@ class Test_local_useless_elemwise_comparison(unittest.TestCase):
         assert len(elem.inputs) == 1, elem.inputs
         assert isinstance(elem.inputs[0], T.TensorConstant), elem
         assert T.extract_constant(elem.inputs[0]) == val, val
-    
+
     def assert_identity(self, f):
         topo = f.maker.fgraph.toposort()
         assert len(topo) == 1
@@ -3224,10 +3224,10 @@ class Test_local_useless_elemwise_comparison(unittest.TestCase):
     def test_inequality_with_self(self):
         x = T.scalar('x', dtype=config.floatX)
         mode = theano.compile.get_default_mode().including('local_useless_elemwise_comparison')
-        
+
         f = theano.function([x], T.lt(x, x), mode=mode)
         self.assert_eqs_const(f, 0)
-        
+
         f = theano.function([x], T.le(x, x), mode=mode)
         self.assert_eqs_const(f, 1)
 
@@ -3289,10 +3289,10 @@ class Test_local_useless_elemwise_comparison(unittest.TestCase):
 
         f = theano.function([x, y], T.ge(x.shape[0]+y.shape[0], 0), mode=mode)
         self.assert_eqs_const(f, 1)
-        
+
     def test_and(self):
         mode = theano.compile.get_default_mode().including('canonicalize')
-        
+
         x = T.scalar('x', dtype='int8')
 
         f = theano.function([x], T.and_(x, 0), mode=mode)
@@ -3849,25 +3849,6 @@ class T_Tile(unittest.TestCase):
                 assert len(topo) == 1
                 assert isinstance(topo[0].op, compile.DeepCopyOp)
                 f(data)
-
-        # If the repeat parameter is longer then v.ndim, we must
-        # replace it with a DimShuffle to add the extra parameter.
-        # But it isn't supported for now, so assert that we raise an
-        # error.
-
-        self.assertRaises(ValueError, T.tile, v, (1,)*(v.ndim+1))
-        # If the repeat parameter is shorter then m.ndim, it should
-        # pad tot he left the repeat patter with 1. It is not supported for now.
-        #f = theano.function([var], T.tile(v, (1,)*(v.ndim+1)))
-        #topo = f.maker.fgraph.toposort()
-        #assert len(topo) == 1
-        #assert isinstance(topo[0].op, DimShuffe)
-
-        self.assertRaises(ValueError, T.tile, m, (1,)*(m.ndim-1))
-        #f = theano.function([var], T.tile(m, (1,)*(m.ndim-1)))
-        #topo = f.maker.fgraph.toposort()
-        #assert len(topo) == 1
-        #assert isinstance(topo[0].op, compile.DeepCopyOp)
 
 
 def speed_local_pow_specialize_range():
@@ -4608,7 +4589,7 @@ class T_local_erfc(unittest.TestCase):
         print(t1 - t0, t2 - t1)
 
 
-class test_local_remove_switch_const_cond(unittest.TestCase):
+class test_local_useless_switch(unittest.TestCase):
     def setUp(self):
         self.mode = mode_opt.excluding('constant_folding')
 
@@ -4735,6 +4716,19 @@ class test_local_remove_switch_const_cond(unittest.TestCase):
         vx = numpy.array([4, 5, 6], dtype='int32')
         vy = numpy.array([[7, 8, 9], [10, 11, 12]], dtype='int64')
         assert numpy.all(f(vx, vy) == vy)
+
+    def test_broadcast3(self):
+        # test switch(matrix, same_vector, same_vector)
+
+        x = theano.tensor.matrix('x', dtype='int32')
+        y = theano.tensor.vector('y', dtype='int64')
+        z = theano.tensor.switch(x, y, y)
+        f = theano.function([x, y], z, mode=self.mode)
+        vx = numpy.array([[0, 1], [1, 0]], dtype='int32')
+        vy = numpy.array([7, 8], dtype='int64')
+        utt.assert_allclose(f(vx, vy), numpy.where(vx, vy, vy))
+        assert len([node.op for node in f.maker.fgraph.toposort() if
+                    isinstance(node.op, theano.tensor.Elemwise)]) == 0
 
 
 class T_local_sum_prod(unittest.TestCase):
@@ -5710,7 +5704,7 @@ def test_local_flatten_lift():
 
 class Test_Reshape(unittest.TestCase):
     def setUp(self):
-        self.mode = mode_opt 
+        self.mode = mode_opt
         self.op = tensor.Reshape
 
     def test_local_reshape(self):
@@ -5720,6 +5714,16 @@ class Test_Reshape(unittest.TestCase):
         f = theano.function([a], c, mode=self.mode)
         topo = f.maker.fgraph.toposort()
         assert sum(isinstance(node.op, self.op) for node in topo) == 1
+
+
+def test_local_useless_reshape():
+    mode = theano.compile.get_default_mode().including(
+            'local_useless_reshape')
+    i = T.iscalar('i')
+    m = theano.tensor.mgrid[0:i,]
+    f = theano.function([i], m, mode=mode)
+    topo = f.maker.fgraph.toposort()
+    assert not any(isinstance(n.op, tensor.basic.Reshape) for n in topo)
 
 
 def test_local_reshape_lift():

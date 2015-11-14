@@ -121,6 +121,9 @@ class ContextsParam(ConfigParam):
                 s = v.split('->')
                 if len(s) != 2:
                     raise ValueError("Malformed context map: %s" % (v,))
+                if (s[0] == 'cpu' or s[0].startswith('cuda') or
+                        s[0].startswith('opencl')):
+                    raise ValueError("Cannot use %s as context name" % (s[0],))
             return val
         ConfigParam.__init__(self, '', filter, False)
 
@@ -132,6 +135,8 @@ AddConfigVar(
     'name->dev_name' format. An example that would map name 'test' to
     device 'cuda0' and name 'test2' to device 'opencl0:0' follows:
     "test->cuda0;test2->opencl0:0".
+
+    Invalid context names are 'cpu', 'cuda*' and 'opencl*'
     """, ContextsParam(), in_c_key=False)
 
 AddConfigVar(
@@ -150,7 +155,7 @@ def default_cuda_root():
         return ''
     for dir in s.split(os.path.pathsep):
         if os.path.exists(os.path.join(dir, "nvcc")):
-            return os.path.split(dir)[0]
+            return os.path.dirname(os.path.abspath(dir))
     return ''
 
 AddConfigVar(
@@ -444,10 +449,14 @@ AddConfigVar(
 AddConfigVar(
     'traceback.limit',
     "The number of stack to trace. -1 mean all.",
-    # We default to 6 to be able to know where v1 + v2 is created in the
+    # We default to a number to be able to know where v1 + v2 is created in the
     # user script. The bigger this number is, the more run time it takes.
-    # We need to default to 7 to support theano.tensor.tensor(...).
-    IntParam(7),
+    # We need to default to 8 to support theano.tensor.tensor(...).
+    # import theano, numpy
+    # X = theano.tensor.matrix()
+    # y = X.reshape((5,3,1))
+    # assert y.tag.trace
+    IntParam(8),
     in_c_key=False)
 
 AddConfigVar('experimental.mrg',
@@ -739,3 +748,20 @@ AddConfigVar(
     "the first optimization, and could possibly still contains some bugs. "
     "Use at your own risks.",
     BoolParam(False))
+
+
+def good_seed_param(seed):
+    if seed == "random":
+        return True
+    try:
+        int(seed)
+    except Exception:
+        return False
+    return True
+
+
+AddConfigVar('unittests.rseed',
+             "Seed to use for randomized unit tests. "
+             "Special value 'random' means using a seed of None.",
+             StrParam(666, is_valid=good_seed_param),
+             in_c_key=False)

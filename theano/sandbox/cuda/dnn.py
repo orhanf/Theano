@@ -13,6 +13,9 @@ from theano.compile.ops import shape_i
 from theano.tensor.nnet import SoftmaxGrad
 from theano.tensor.signal.downsample import (
     DownsampleFactorMax, MaxPoolGrad, AveragePoolGrad)
+from theano.tensor.opt import register_specialize_device
+from theano.sandbox.cuda.type import CudaNdarrayType
+
 from theano.sandbox.cuda import GpuOp
 from theano.sandbox.cuda.basic_ops import (as_cuda_ndarray_variable,
                                            host_from_gpu,
@@ -26,6 +29,12 @@ from theano.sandbox.cuda.opt_util import alpha_merge, output_merge
 from theano.sandbox.cuda import gpu_seqopt, register_opt
 
 from theano.sandbox.cuda.nvcc_compiler import NVCC_compiler
+
+from theano.tensor.nnet.abstract_conv2d import (AbstractConv2d,
+                                                AbstractConv2d_gradWeights,
+                                                AbstractConv2d_gradInputs)
+from theano.tensor.opt import register_specialize_device
+
 
 
 def dnn_available():
@@ -96,7 +105,7 @@ if ((err = cudnnCreate(&_handle)) != CUDNN_STATUS_SUCCESS) {
                         " This isn't supported anymore."
                         " Update to CuDNN v2 final version.")
                     raise RuntimeError(dnn_available.msg)
-                if v[0] >= 3000 and v[0] < 3007:
+                if 3000 <= v[0] < 3007:
                     # 3007 is the final release of cudnn v3
                     dnn_available.avail = False
                     dnn_available.msg = (
@@ -579,9 +588,9 @@ class GpuDnnConv3d(GpuDnnConv):
     :param descr: the convolution descriptor
     :param workmem:
         *deprecated*, use parameter algo instead.
-    :param algo: ['none', 'guess_once', 'guess_on_shape_change',
-                  'time_once', 'time_on_shape_change']
-            Default is the value of :attr:`config.dnn.conv.algo_fwd.
+    :param algo: ['none', 'guess_once', 'guess_on_shape_change', 'time_once', 'time_on_shape_change']
+        Default is the value of :attr:`config.dnn.conv.algo_fwd`.
+
     """
     __props__ = ('algo', 'inplace')
     __input_name__ = ('image', 'kernel', 'output',
@@ -683,11 +692,7 @@ class GpuDnnConvGradW(DnnBase, COp):
         The convolution descriptor.
     workmem
         *deprecated*, use parameter algo instead.
-    algo
-        ['none', 'deterministic', 'fft', 'guess_once',
-         'guess_on_shape_change', 'time_once',
-         'time_on_shape_change']
-
+    algo : {'none', 'deterministic', 'fft', 'guess_once', 'guess_on_shape_change', 'time_once', 'time_on_shape_change'}
         Default is the value of :attr:`config.dnn.conv.algo_bwd`.
 
     """
@@ -822,8 +827,7 @@ class GpuDnnConv3dGradW(GpuDnnConvGradW):
     :param descr: the convolution descriptor
     :param workmem:
         *deprecated*, use parameter algo instead.
-    :param algo: ['none', 'guess_once', 'guess_on_shape_change',
-                  'time_once', 'time_on_shape_change']
+    :param algo: ['none', 'guess_once', 'guess_on_shape_change', 'time_once', 'time_on_shape_change']
         Default is the value of :attr:`config.dnn.conv.algo_bwd`.
 
     """
@@ -1095,8 +1099,8 @@ def dnn_conv(img, kerns, border_mode='valid', subsample=(1, 1),
     """
     GPU convolution using cuDNN from NVIDIA.
 
-    The memory layout to use is 'bc01', that is 'batch', 'channel', 'first dim',
-    'second dim' in that order.
+    The memory layout to use is 'bc01', that is 'batch', 'channel',
+    'first dim', 'second dim' in that order.
 
     Parameters
     ----------
@@ -1129,7 +1133,7 @@ def dnn_conv(img, kerns, border_mode='valid', subsample=(1, 1),
     algo : {'none', 'small', 'large', 'fft', 'guess_once', 'guess_on_shape_change', 'time_once', 'time_on_shape_change'}
 	Convolution implementation to use. Some of its  values may require certain
         versions of CuDNN to be installed. Default is the value of
-        :attr:`config.dnn.conv.algo_fwd.
+        :attr:`config.dnn.conv.algo_fwd`.
 
     """
 
@@ -1221,7 +1225,7 @@ def dnn_conv3d(img, kerns, border_mode='valid', subsample=(1, 1, 1),
     :param workmem: *deprecated*, use param algo instead
     :param algo: convolution implementation to use. Only 'none' is implemented
         for the conv3d. Default is the value of
-        :attr:`config.dnn.conv.algo_fwd.
+        :attr:`config.dnn.conv.algo_fwd`.
 
     :warning: The cuDNN library only works with GPU that have a compute
       capability of 3.0 or higer.  This means that older GPU will not
@@ -1274,6 +1278,58 @@ def dnn_conv3d(img, kerns, border_mode='valid', subsample=(1, 1, 1),
                                          desc_op.subsample)
     out = gpu_alloc_empty(*out_shp)
     return GpuDnnConv3d(algo=algo)(img, kerns, out, desc)
+
+
+def dnn_gradweight(img, topgrad,
+                   kerns_shp,
+                   border_mode='valid', subsample=(1, 1),
+                   conv_mode='conv'):
+    """
+    GPU convolution gradient with respect to weight using cuDNN from NVIDIA.
+
+    The memory layout to use is 'bc01', that is 'batch', 'channel',
+    'first dim', 'second dim' in that order.
+
+    FIXME parameters doc
+
+    :warning: The cuDNN library only works with GPU that have a compute
+      capability of 3.0 or higer.  This means that older GPU will not
+      work with this Op.
+    """
+
+    img = gpu_contiguous(img)
+    topgrad = gpu_contiguous(topgrad)
+    kerns_shp = theano.tensor.as_tensor_variable(kerns_shp) 
+    desc = GpuDnnConvDesc(border_mode=border_mode, subsample=subsample,
+                          conv_mode=conv_mode)(img.shape, kerns_shp)
+    out = gpu_alloc_empty(*kerns_shp)
+    return GpuDnnConvGradW()(img, topgrad, out, desc)
+
+def dnn_gradinput(kerns, topgrad,
+                  img_shp,
+                  border_mode='valid', subsample=(1, 1),
+                  conv_mode='conv'):
+    """
+    GPU convolution gradient with respect to input using cuDNN from NVIDIA.
+
+    The memory layout to use is 'bc01', that is 'batch', 'channel',
+    'first dim', 'second dim' in that order.
+
+    FIXME parameters doc
+
+    :warning: The cuDNN library only works with GPU that have a compute
+      capability of 3.0 or higer.  This means that older GPU will not
+      work with this Op.
+    """
+
+    kerns = gpu_contiguous(kerns)
+    topgrad = gpu_contiguous(topgrad)
+    img_shp = theano.tensor.as_tensor_variable(img_shp)
+    desc = GpuDnnConvDesc(border_mode=border_mode, subsample=subsample,
+                          conv_mode=conv_mode)(img_shp, kerns.shape)
+
+    out = gpu_alloc_empty(*img_shp)
+    return GpuDnnConvGradI()(kerns, topgrad, out, desc)
 
 
 class GpuDnnPoolDesc(GpuOp):
@@ -2383,3 +2439,47 @@ if True:
                 gpu_contiguous(ins[1])
             )
             return [out.dimshuffle(0, 1)]
+
+### AbstractConv Optimizations
+@local_optimizer([AbstractConv2d, AbstractConv2d_gradWeights, AbstractConv2d_gradInputs])
+def local_abstractconv_cudnn(node):
+    inp1 = node.inputs[0]
+    inp2 = node.inputs[1]
+
+    if ((not isinstance(node.op, AbstractConv2d) or
+         not isinstance(node.op, AbstractConv2d_gradWeights) or
+         not isinstance(node.op, AbstractConv2d_gradInputs))):
+        return None
+
+    if not isinstance(inp1.type, CudaNdarrayType) or \
+            not isinstance(inp2.type, CudaNdarrayType):
+        return None
+    if not dnn_available():
+        return None
+
+    if node.op.filters_flip:
+        conv_mode = 'conv'
+    else:
+        conv_mode = 'cross'
+    if (isinstance(node.op, AbstractConv2d)):
+        rval = dnn_conv(inp1, inp2,
+                        border_mode=node.op.border_mode,
+                        subsample=node.op.subsample,
+                        direction_hint='forward',
+                        conv_mode = conv_mode)
+        return [rval]
+    if (isinstance(node.op, AbstractConv2d_gradWeights)):
+        shape = (inp2.shape[1], inp1.shape[1], node.inputs[2][0], node.inputs[2][1])
+        rval = dnn_gradweight(inp1, inp2, shape,
+                              border_mode=node.op.border_mode,
+                              subsample=node.op.subsample,
+                              conv_mode = conv_mode)
+        return [rval]
+    if (isinstance(node.op, AbstractConv2d_gradInputs)):
+        shape = (inp2.shape[0], inp1.shape[1], node.inputs[2][0], node.inputs[2][1])
+        rval = dnn_gradinput(inp1, inp2, shape,
+                             border_mode=node.op.border_mode,
+                             subsample=node.op.subsample,
+                             conv_mode = conv_mode)
+        return [rval]
+

@@ -74,7 +74,7 @@ def _dnn_check_version():
             "You have an old release of CuDNN (or a release candidate) "
             "that isn't supported.  Please update to at least v2 final "
             "version.")
-    if v >= 3000 and v < 3007:
+    if 3000 <= v < 3007:
         return False, (
             "You have installed a release candidate of CuDNN v3. This "
             "isn't supported. Please update to v3 final version.")
@@ -133,9 +133,9 @@ class DnnBase(COp):
     # dnn does not know about broadcasting, so we do not need to assert
     # the input broadcasting pattern.
     check_broadcast = False
-    context_type = gpu_context_type
+    params_type = gpu_context_type
 
-    def get_context(self, node):
+    def get_params(self, node):
         return node.outputs[0].type.context
 
     def __init__(self, files=None, c_func=None):

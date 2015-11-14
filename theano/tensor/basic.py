@@ -1,4 +1,5 @@
 """A `Type` and `Op` classes to work with numpy.ndarrays symbolically."""
+from six.moves import builtins
 import sys
 import warnings
 
@@ -431,7 +432,7 @@ def constant(x, name=None, ndim=None, dtype=None):
         return ret
     sig = ret.signature()
     if (sig not in constant_cache and ret.data.size == 1 and
-        ret.data <= 10 and ret.data >= -10 and
+        (-10) <= ret.data <= 10 and
         (ret.dtype in int_dtypes or ret.dtype in uint_dtypes or
          (ret.dtype in float_dtypes and int(ret.data) == ret.data))):
         constant_cache[sig] = ret
@@ -763,11 +764,11 @@ def get_scalar_constant_value(orig_v, elemwise=True,
                     if not (idx < len(gp_broadcastable)):
                         msg = ("get_scalar_constant_value detected " +
                                "deterministic IndexError: x.shape[%d] " +
-                               "when x.ndim=%d.") % (ndim, idx)
+                               "when x.ndim=%d.") % (idx, ndim)
                         if config.exception_verbosity == 'high':
-                            msg += 'x=%s' % min_informative_str(v)
+                            msg += ' x=%s' % min_informative_str(v)
                         else:
-                            msg += 'x=%s' % str(v)
+                            msg += ' x=%s' % str(v)
                         raise ValueError(msg)
 
                     if gp_broadcastable[idx]:
@@ -1738,42 +1739,42 @@ def largest(*args):
 # Comparison
 ##########################
 
-@_scal_elemwise_with_nfunc('less', 2, 1)
+@_scal_elemwise
 def lt(a, b):
     """a < b"""
 
 
-@_scal_elemwise_with_nfunc('greater', 2, 1)
+@_scal_elemwise
 def gt(a, b):
     """a > b"""
 
 
-@_scal_elemwise_with_nfunc('less_equal', 2, 1)
+@_scal_elemwise
 def le(a, b):
     """a <= b"""
 
 
-@_scal_elemwise_with_nfunc('greater_equal', 2, 1)
+@_scal_elemwise
 def ge(a, b):
     """a >= b"""
 
 
-@_scal_elemwise_with_nfunc('equal', 2, 1)
+@_scal_elemwise
 def eq(a, b):
     """a == b"""
 
 
-@_scal_elemwise_with_nfunc('not_equal', 2, 1)
+@_scal_elemwise
 def neq(a, b):
     """a != b"""
 
 
-@_scal_elemwise_with_nfunc('isnan', 1, 1)
+@_scal_elemwise
 def isnan(a):
     """isnan(a)"""
 
 
-@_scal_elemwise_with_nfunc('isinf', 1, 1)
+@_scal_elemwise
 def isinf(a):
     """isinf(a)"""
 
@@ -1922,7 +1923,7 @@ def isclose(a, b, rtol=1.e-5, atol=1.e-8, equal_nan=False):
 # Condition
 ##########################
 
-@_scal_elemwise_with_nfunc('where', 3, 1)
+@_scal_elemwise
 def switch(cond, ift, iff):
     """if cond then ift else iff"""
 
@@ -1932,25 +1933,25 @@ where = switch
 ##########################
 
 
-@_scal_elemwise_with_nfunc('bitwise_and', 2, 1)
+@_scal_elemwise
 def and_(a, b):
     """bitwise a & b"""
 bitwise_and = and_  # numpy name for it
 
 
-@_scal_elemwise_with_nfunc('bitwise_or', 2, 1)
+@_scal_elemwise
 def or_(a, b):
     """bitwise a | b"""
 bitwise_or = or_  # numpy name for it
 
 
-@_scal_elemwise_with_nfunc('bitwise_xor', 2, 1)
+@_scal_elemwise
 def xor(a, b):
     """bitwise a ^ b"""
 bitwise_xor = xor  # numpy name for it
 
 
-@_scal_elemwise_with_nfunc('invert', 1, 1)
+@_scal_elemwise
 def invert(a):
     """bitwise ~a"""
 bitwise_not = invert  # numpy alias for it
@@ -1960,7 +1961,7 @@ bitwise_not = invert  # numpy alias for it
 # Math
 ##########################
 
-@_scal_elemwise_with_nfunc('abs', 1, 1)
+@_scal_elemwise
 def abs_(a):
     """|`a`|
 
@@ -1972,22 +1973,22 @@ def abs_(a):
 pprint.assign(abs_, printing.PatternPrinter(('|%(0)s|', -1000)))
 
 
-@_scal_elemwise_with_nfunc('exp', 1, 1)
+@_scal_elemwise
 def exp(a):
     """e^`a`"""
 
 
-@_scal_elemwise_with_nfunc('exp2', 1, 1)
+@_scal_elemwise
 def exp2(a):
     """2^`a`"""
 
 
-@_scal_elemwise_with_nfunc('expm1', 1, 1)
+@_scal_elemwise
 def expm1(a):
     """e^`a` - 1"""
 
 
-@_scal_elemwise_with_nfunc('negative', 1, 1)
+@_scal_elemwise
 def neg(a):
     """-a"""
 
@@ -1999,42 +2000,42 @@ def inv(a):
     """1.0/a"""
 
 
-@_scal_elemwise_with_nfunc('log', 1, 1)
+@_scal_elemwise
 def log(a):
     """base e logarithm of a"""
 
 
-@_scal_elemwise_with_nfunc('log2', 1, 1)
+@_scal_elemwise
 def log2(a):
     """base 2 logarithm of a"""
 
 
-@_scal_elemwise_with_nfunc('log10', 1, 1)
+@_scal_elemwise
 def log10(a):
     """base 10 logarithm of a"""
 
 
-@_scal_elemwise_with_nfunc('log1p', 1, 1)
+@_scal_elemwise
 def log1p(a):
     """log(1+a)"""
 
 
-@_scal_elemwise_with_nfunc('sign', 1, 1)
+@_scal_elemwise
 def sgn(a):
     """sign of a"""
 
 
-@_scal_elemwise_with_nfunc('ceil', 1, 1)
+@_scal_elemwise
 def ceil(a):
     """ceiling of a"""
 
 
-@_scal_elemwise_with_nfunc('floor', 1, 1)
+@_scal_elemwise
 def floor(a):
     """floor of a"""
 
 
-@_scal_elemwise_with_nfunc('trunc', 1, 1)
+@_scal_elemwise
 def trunc(a):
     """trunc of a"""
 
@@ -2056,7 +2057,7 @@ def round(a, mode="half_away_from_zero"):
         raise Exception("round mode %s is not implemented." % mode)
 
 
-@_scal_elemwise_with_nfunc('around', 1, 1)
+@_scal_elemwise
 def round_half_to_even(a):
     """round_half_to_even(a)"""
 
@@ -2066,7 +2067,7 @@ def round_half_away_from_zero(a):
     """round_half_away_from_zero(a)"""
 
 
-@_scal_elemwise_with_nfunc('square', 1, 1)
+@_scal_elemwise
 def sqr(a):
     """square of a"""
 
@@ -2075,82 +2076,82 @@ def sqr(a):
 square = sqr
 
 
-@_scal_elemwise_with_nfunc('sqrt', 1, 1)
+@_scal_elemwise
 def sqrt(a):
     """square root of a"""
 
 
-@_scal_elemwise_with_nfunc('deg2rad', 1, 1)
+@_scal_elemwise
 def deg2rad(a):
     """convert degree a to radian"""
 
 
-@_scal_elemwise_with_nfunc('rad2deg', 1, 1)
+@_scal_elemwise
 def rad2deg(a):
     """convert radian a to degree"""
 
 
-@_scal_elemwise_with_nfunc('cos', 1, 1)
+@_scal_elemwise
 def cos(a):
     """cosine of a"""
 
 
-@_scal_elemwise_with_nfunc('arccos', 1, 1)
+@_scal_elemwise
 def arccos(a):
     """arccosine of a"""
 
 
-@_scal_elemwise_with_nfunc('sin', 1, 1)
+@_scal_elemwise
 def sin(a):
     """sine of a"""
 
 
-@_scal_elemwise_with_nfunc('arcsin', 1, 1)
+@_scal_elemwise
 def arcsin(a):
     """arcsine of a"""
 
 
-@_scal_elemwise_with_nfunc('tan', 1, 1)
+@_scal_elemwise
 def tan(a):
     """tangent of a"""
 
 
-@_scal_elemwise_with_nfunc('arctan', 1, 1)
+@_scal_elemwise
 def arctan(a):
     """arctangent of a"""
 
 
-@_scal_elemwise_with_nfunc('arctan2', 1, 1)
+@_scal_elemwise
 def arctan2(a, b):
     """arctangent of a / b"""
 
 
-@_scal_elemwise_with_nfunc('cosh', 1, 1)
+@_scal_elemwise
 def cosh(a):
     """hyperbolic cosine of a"""
 
 
-@_scal_elemwise_with_nfunc('arccosh', 1, 1)
+@_scal_elemwise
 def arccosh(a):
     """hyperbolic arc cosine of a"""
 
 
-@_scal_elemwise_with_nfunc('sinh', 1, 1)
+@_scal_elemwise
 def sinh(a):
     """hyperbolic sine of a"""
 
 
-@_scal_elemwise_with_nfunc('arcsinh', 1, 1)
+@_scal_elemwise
 def arcsinh(a):
     """hyperbolic arc sine of a"""
 
 
-@_scal_elemwise_with_nfunc('tanh', 1, 1)
+@_scal_elemwise
 def tanh(a):
     """hyperbolic tangent of a"""
 
 
-@_scal_elemwise_with_nfunc('arctanh', 1, 1)
+@_scal_elemwise
 def arctanh(a):
     """hyperbolic arc tangent of a"""
 
@@ -2200,21 +2201,19 @@ def chi2sf(x, k):
     """chi squared survival function"""
 
 
-# numpy.real(float32) return a view on the inputs.
-# @_scal_elemwise_with_nfunc('real', 1, 1)
 @_scal_elemwise
 def real(z):
     """Return real component of complex-valued tensor `z`"""
 _tensor_py_operators.real = property(real)
 
 
-@_scal_elemwise_with_nfunc('imag', 1, 1)
+@_scal_elemwise
 def imag(z):
     """Return imaginary component of complex-valued tensor `z`"""
 _tensor_py_operators.imag = property(imag)
 
 
-@_scal_elemwise_with_nfunc('angle', 1, 1)
+@_scal_elemwise
 def angle(z):
     """Return polar-coordinate angle of complex-valued tensor `z`"""
 
@@ -2224,7 +2223,7 @@ def complex(real, imag):
     """Return complex-valued tensor with `real` and `imag` components"""
 
 
-@_scal_elemwise_with_nfunc('conj', 1, 1)
+@_scal_elemwise
 def conj(z):
     """Return the complex conjugate of `z`."""
 
@@ -2850,10 +2849,45 @@ class Alloc(gof.Op):
                 return False
         return True
 
-
 alloc = Alloc()
 pprint.assign(alloc, printing.FunctionPrinter('alloc'))
 
+
+def transfer(var, target):
+    """
+    Return a version of `var` transferred to `target`.
+
+    `cpu` mean a TensorType (on the CPU).  Other types may define
+    additional targets.
+
+    Parameters
+    ----------
+    var : variable
+        A theano variable
+    target : str
+        The target of the transfer
+    """
+    if target == 'cpu':
+        return as_tensor_variable(var)
+    else:
+        for trans in transfer._others:
+            res = trans(var, target)
+            if res is not None:
+                return res
+    raise ValueError("Can't transfer to target %s" % (target,))
+
+transfer._others = []
+
+
+def register_transfer(fn):
+    """
+    Register a transfer function for alternative targets.
+
+    Parameters
+    ----------
+    fn : callable
+    """
+    transfer._others.append(fn)
 
 """Create a duplicate of `a` (with duplicated storage)"""
 tensor_copy = elemwise.Elemwise(scal.identity)
@@ -3166,13 +3200,13 @@ setdefault = default  # legacy
 ##########################
 # Arithmetics
 ##########################
-@_scal_elemwise_with_nfunc('maximum', 2, 1)
+@_scal_elemwise
 def maximum(x, y):
     """elemwise maximum. See max for the maximum in one tensor"""
     # see decorator for function body
 
 
-@_scal_elemwise_with_nfunc('minimum', 2, 1)
+@_scal_elemwise
 def minimum(x, y):
     """elemwise minimum. See min for the minimum in one tensor"""
     # see decorator for function body
@@ -3191,31 +3225,31 @@ def divmod(x, y):
     return floor_div(x, y), mod_check(x, y)
 
 
-@_scal_elemwise_with_nfunc('add', 2, 1)
+@_scal_elemwise
 def add(a, *other_terms):
     """elementwise addition"""
     # see decorator for function body
 
 
-@_scal_elemwise_with_nfunc('subtract', 2, 1)
+@_scal_elemwise
 def sub(a, b):
     """elementwise subtraction"""
     # see decorator for function body
 
 
-@_scal_elemwise_with_nfunc('multiply', 2, 1)
+@_scal_elemwise
 def mul(a, *other_terms):
     """elementwise multiplication"""
     # see decorator for function body
 
 
-@_scal_elemwise_with_nfunc('true_divide', 2, 1)
+@_scal_elemwise
 def true_div(a, b):
     """elementwise [true] division (inverse of multiplication)"""
     # see decorator for function body
 
 
-@_scal_elemwise_with_nfunc('floor_divide', 2, 1)
+@_scal_elemwise
 def int_div(a, b):
     """elementwise [floor] division (inverse of multiplication)"""
     # see decorator for function body
@@ -3256,20 +3290,18 @@ def mod_check(x, y):
         return mod(x, y)
 
 
-@_scal_elemwise_with_nfunc('mod', 2, 1)
+@_scal_elemwise
 def mod(a, b):
     """elementwise modulo"""
     # see decorator for function body
 
 
-@_scal_elemwise_with_nfunc('power', 2, 1)
+@_scal_elemwise
 def pow(a, b):
     """elementwise power"""
     # see decorator for function body
 
 
-# The numpy.clip don't work correctly when the min is bigger then the max,
-# So we do not use @scal_elemwise_with_nfunc('clip', 3, 1)
 @_scal_elemwise
 def clip(x, min, max):
     """
@@ -3875,6 +3907,14 @@ class Join(Op):
             assert shp is not None
             assert len(shp) == n_dim
 
+        # The joining dimension could be negative, but we need it to be
+        # in [0, n_dim) in the loop below.
+        # An axis < -n_dim or >= ndim would be invalid, but this is
+        # not checked here. An Assert op would be a way of addressing that,
+        # but it may disrupt optimizations.
+        join_dim = switch(ge(node.inputs[0], 0),
+                          node.inputs[0],
+                          node.inputs[0] + n_dim)
         out_shapes = []
         for dim in xrange(n_dim):
             # we have to deal with 2 possible cases in here :
@@ -3892,7 +3932,7 @@ class Join(Op):
             for shp in ishapes[2:]:
                 t_side = t_side + shp[dim]
             # return the dimensions found
-            out_shapes.append(switch(eq(dim, node.inputs[0]),
+            out_shapes.append(switch(eq(dim, join_dim),
                               t_side, f_side))
 
         return [tuple(out_shapes)]
@@ -3928,7 +3968,7 @@ pprint.assign(lambda pstate, r: r.owner and isinstance(r.owner.op, Join),
 
 def roll(x, shift, axis=None):
     """
-    Convenience function to roll `TensorType`s along the given axis.
+    Convenience function to roll TensorTypes along the given axis.
 
     Syntax copies numpy.roll function.
 
@@ -3946,7 +3986,7 @@ def roll(x, shift, axis=None):
     Returns
     -------
     tensor
-        Output tensor, with the same shape as `x`.
+        Output tensor, with the same shape as ``x``.
 
     """
     if axis is None:
@@ -4711,32 +4751,67 @@ def tile(x, reps, ndim=None):
 
     See the docstring of `numpy.tile` for details.
 
-    Currently, x.ndim and len(reps) must be equal, and, if specified, 'ndim'
-    must be equal to both.
+    'reps' can be constant integer (e.g. 3), constant vector(e.g. [2 3]),
+    symbolic scalar (e.g. tensor.iscalar()), symbolic vector (e.g. tensor.ivector())
+    or a list of symbolic scalar (e.g. [tensor.iscalar(), tensor.iscalar()]).
 
-    TODO: expand this.
+    ndim is the number of the dimensions of the output, if it is provided, ndim
+    should be equal or larger than x.ndim and len(reps), otherwise, we will use
+    max(x.ndim, len(reps)) as ndim. If reps is symbolic vector, the ndim has to
+    be provided.
 
     """
 
-    try:
-        iter(reps)
-    except TypeError:
-        raise ValueError("reps must be iterable")
-    if not numpy.all([isinstance(r, integer_types) or
-                      (isinstance(r, TensorVariable) and
-                      r.dtype in ["int8", "int16", "int32", "int64"])
-                      for r in reps]):
-        raise ValueError("elements of reps must be scalars of integer dtype")
-    elif len(reps) != x.ndim:
-        raise ValueError("len(reps) != x.ndim not currently supported")
-    elif (ndim is not None) and ndim != x.ndim:
-        raise ValueError("if specified, ndim must be equal to both x.ndim and "
-                         "len(reps)")
+    if ndim is not None and ndim < x.ndim:
+        raise ValueError("ndim should be equal or larger than x.ndim")
 
-    if ndim is None:
-        ndim = len(reps)
+    # if reps is tensor.scalar, integer or tensor.vector, we convert it to a list.
+    if not isinstance(reps, (list, tuple)):
+        reps_astensor = as_tensor_variable(reps)
+        ndim_check = reps_astensor.ndim
+        if reps_astensor.dtype not in theano.tensor.discrete_dtypes:
+            raise ValueError("elements of reps must be integer dtype")
+
+        # tensor.scalar/integer case
+        if ndim_check == 0:
+            reps = [reps]
+
+        # tensor.vector case
+        elif ndim_check == 1:
+            if ndim is None:
+                raise ValueError("if reps is tensor.vector, you should specify "
+                                 "the ndim")
+            else:
+                offset = ndim - reps.shape[0]
+
+                # assert that reps.shape[0] does not exceed ndim
+                offset = theano.tensor.opt.assert_(offset, ge(offset, 0))
+
+                # if reps.ndim is less than x.ndim, we pad the reps with
+                # "1" so that reps will have the same ndim as x.
+                reps_ = [switch(i < offset, 1, reps[i - offset]) for i in range(ndim)]
+                reps = reps_
+
+        # other raise error
+        else:
+            raise ValueError("the dimension of reps should not exceed 1")
+    else:
+        if ndim is not None and len(reps) > ndim:
+            raise ValueError("len(reps) should be equal or less than ndim")
+        if not numpy.all([isinstance(r, integer_types) or
+                          (isinstance(r, TensorVariable) and
+                           r.dtype in theano.tensor.discrete_dtypes) for r in reps]):
+            raise ValueError("elements of reps must be scalars of integer dtype")
+
+    # if reps.ndim is less than x.ndim, we pad the reps with
+    # "1" so that reps will have the same ndim as x.
     reps = list(reps)
-    shape = [x.shape[i] for i in xrange(ndim)]
+    if ndim is None:
+        ndim = builtins.max(len(reps), x.ndim)
+    if len(reps) < ndim:
+        reps = [1] * (ndim - len(reps)) + reps
+
+    shape = [1] * (ndim - x.ndim) + [x.shape[i] for i in xrange(x.ndim)]
     alloc_shape = reps + shape
     y = alloc(x, *alloc_shape)
     shuffle_ind = numpy.arange(ndim * 2).reshape(2, ndim)
